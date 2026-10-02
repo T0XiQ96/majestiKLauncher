@@ -21,14 +21,14 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
 
 namespace VFALauncher
 {
     // ------------------------------------------------------------------ Server-Liste (mehrere Server im Dropdown)
     class ServerEntry
     {
-        public string Name = "", Url = "", Kind = "manifest", Slug = "", Logo = "";
+        public string Name = "", Url = "", Kind = "manifest", Slug = "", Logo = "", LogoUrl = ""; public bool Remote;
         public bool IsCollection { get { return Kind == "collection"; } }
         public override string ToString() { return Name + (IsCollection ? "  (Steam-Kollektion)" : ""); }
         public static bool LooksLikeSteam(string url) { return url.IndexOf("steamcommunity.com", StringComparison.OrdinalIgnoreCase) >= 0 || url.StartsWith("steam://", StringComparison.OrdinalIgnoreCase); }
@@ -59,7 +59,7 @@ namespace VFALauncher
             }
             foreach (var d in Util.L2(Util.ReadJson(FilePath), "servers"))
             {
-                var e = new ServerEntry { Name = Util.S(d, "name"), Url = Util.S(d, "url"), Kind = Util.S(d, "kind", "manifest"), Slug = Util.S(d, "slug"), Logo = Util.S(d, "logo") };
+                var e = new ServerEntry { Name = Util.S(d, "name"), Url = Util.S(d, "url"), Kind = Util.S(d, "kind", "manifest"), Slug = Util.S(d, "slug"), Logo = Util.S(d, "logo"), LogoUrl = Util.S(d, "logoUrl"), Remote = Util.S(d, "remote").Equals("true", StringComparison.OrdinalIgnoreCase) };
                 if (e.Name != "" && e.Url != "") res.Add(e);
             }
             return res;
@@ -69,7 +69,7 @@ namespace VFALauncher
         {
             var list = new List<object>();
             foreach (var e in all)
-                list.Add(new Dictionary<string, object> { { "name", e.Name }, { "url", e.Url }, { "kind", e.Kind }, { "slug", e.Slug }, { "logo", e.Logo } });
+                list.Add(new Dictionary<string, object> { { "name", e.Name }, { "url", e.Url }, { "kind", e.Kind }, { "slug", e.Slug }, { "logo", e.Logo }, { "logoUrl", e.LogoUrl }, { "remote", e.Remote } });
             Util.WriteJson(FilePath, new Dictionary<string, object> { { "selected", selectedSlug }, { "servers", list } });
         }
     }
@@ -77,10 +77,11 @@ namespace VFALauncher
     // Dialog: Server hinzufuegen
     class AddServerForm : Form
     {
-        public TextBox tName, tUrl;
+        protected override void OnLoad(EventArgs e) { base.OnLoad(e); Loc.Apply(this); }
+        public TextBox tName, tUrl, tLogo;
         public AddServerForm()
         {
-            Text = "Server hinzufuegen"; Width = 640; Height = 330; StartPosition = FormStartPosition.CenterParent;
+            Text = "Server hinzufuegen"; Width = 640; Height = 390; StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
             Controls.Add(new Label { Text = "Name des Servers (z.B. Project Viewpoint):", AutoSize = true, Location = new Point(14, 14) });
             tName = new TextBox { Location = new Point(14, 36), Width = 596 };
@@ -95,10 +96,266 @@ namespace VFALauncher
                        "    das Mod-Paket von dort und installiert es.",
                 AutoSize = true, Location = new Point(14, 128)
             });
-            var ok = new Button { Text = "Hinzufuegen", Location = new Point(400, 236), Width = 110, Height = 32, DialogResult = DialogResult.OK };
-            var cancel = new Button { Text = "Abbrechen", Location = new Point(520, 236), Width = 90, Height = 32, DialogResult = DialogResult.Cancel };
+            Controls.Add(new Label { Text = "Logo-Link (Bild, optional - wird fuer alle Spieler angezeigt):", AutoSize = true, Location = new Point(14, 206) });
+            tLogo = new TextBox { Location = new Point(14, 228), Width = 596 };
+            Controls.Add(tLogo);
+            var ok = new Button { Text = "Hinzufuegen", Location = new Point(400, 292), Width = 110, Height = 32, DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "Abbrechen", Location = new Point(520, 292), Width = 90, Height = 32, DialogResult = DialogResult.Cancel };
             Controls.AddRange(new Control[] { tName, tUrl, ok, cancel }); AcceptButton = ok; CancelButton = cancel;
         }
+    }
+
+    // ------------------------------------------------------------------ Sprache (DE / EN)
+    // Alle Texte im Programm sind deutsch. Ist Englisch gewaehlt, werden Texte (Beschriftungen, Log, Meldungen) ueber diese
+    // Phrasen-Tabelle uebersetzt (laengste Phrase zuerst). Der DEV-Tab bleibt deutsch.
+    static class Loc
+    {
+        public static bool En;
+        static string LangFile { get { return Path.Combine(Util.BaseDataDir, "lang.txt"); } }
+        public static void Init()
+        {
+            string l = "";
+            try { if (File.Exists(LangFile)) l = File.ReadAllText(LangFile).Trim().ToLowerInvariant(); } catch { }
+            if (l == "") l = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de" ? "de" : "en";
+            En = l == "en";
+        }
+        public static void Save(bool en) { try { File.WriteAllText(LangFile, en ? "en" : "de"); } catch { } }
+
+        static List<KeyValuePair<string, string>> pairs;
+        static readonly string[] P = {
+            // --- Tabs, Hauptfenster
+            "Info / Anleitung", "Info / Guide",
+            "Spielen", "Play",
+            "Lade Manifest ...", "Loading manifest ...",
+            "Server-Adresse kopieren", "Copy server address",
+            "Installieren / Aktualisieren", "Install / Update",
+            "ZIP manuell waehlen ...", "Choose ZIP manually ...",
+            "Abbrechen", "Cancel",
+            "Mod-Einstellungen des Kurators uebernehmen (Backup wird angelegt)", "Apply the curator's mod settings (a backup is created)",
+            "Download-ZIP nach der Installation behalten", "Keep the downloaded ZIP after installing",
+            "RAM fuer das Spiel (GB, 0 = nicht aendern):", "RAM for the game (GB, 0 = don't change):",
+            "Nur ZombieBuddy installieren ...", "Install ZombieBuddy only ...",
+            "Server:", "Server:",
+            "Bereit.", "Ready.",
+            "  (Steam-Kollektion)", "  (Steam collection)",
+            " (Steam-Kollektion)", " (Steam collection)",
+            "Eigenes Logo entfernen", "Remove custom logo",
+            "launcher_info.txt fehlt neben der EXE.", "launcher_info.txt is missing next to the EXE.",
+            // --- Server hinzufuegen / entfernen (DEV)
+            "Server hinzufuegen", "Add server",
+            "+ Server hinzufuegen", "+ Add server",
+            "Name des Servers (z.B. Project Viewpoint):", "Server name (e.g. Project Viewpoint):",
+            "Link:", "Link:",
+            "Zwei Arten von Links:\r\n", "Two kinds of links:\r\n",
+            "  - Steam-Workshop-Kollektion (steamcommunity.com/...): Der Launcher oeffnet die Kollektion in Steam,\r\n", "  - Steam Workshop collection (steamcommunity.com/...): the launcher opens the collection in Steam,\r\n",
+            "    dort abonnierst du alles auf einmal ('Alle abonnieren').\r\n", "    where you subscribe to everything at once ('Subscribe to all').\r\n",
+            "  - Download-Link zu einer manifest.json (wie beim Very-Far-Away-Server): Der Launcher laedt\r\n", "  - Download link to a manifest.json (like the Very Far Away server): the launcher downloads\r\n",
+            "    das Mod-Paket von dort und installiert es.", "    the mod package from there and installs it.",
+            "Logo-Link (Bild, optional - wird fuer alle Spieler angezeigt):", "Logo link (image, optional - shown to all players):",
+            "Hinzufuegen", "Add",
+            "Bitte Name und Link eingeben.", "Please enter a name and a link.",
+            "Der Link muss mit https:// beginnen.", "The link must start with https://.",
+            "Einen Server mit diesem Namen gibt es schon.", "A server with this name already exists.",
+            "Das ist kein Mod-Paket-Manifest (kein 'packUrl'/'version').", "This is not a mod package manifest (no 'packUrl'/'version').",
+            "Der Link ist als Manifest nicht lesbar:\r\n", "The link cannot be read as a manifest:\r\n",
+            "\r\n\r\nTrotzdem speichern?", "\r\n\r\nSave anyway?",
+            "Server hinzugefuegt: ", "Server added: ",
+            " (Steam-Kollektion - Spieler werden dorthin geleitet)", " (Steam collection - players are sent there)",
+            " (Download-Link)", " (download link)",
+            "Server entfernen", "Remove server",
+            "' aus der Liste entfernen?\r\n(Bereits installierte Mods bleiben im Spielordner.)", "' from the list?\r\n(Mods that are already installed stay in the game folder.)",
+            "Zuerst einen Server auswaehlen oder hinzufuegen.", "Please select or add a server first.",
+            "Logo fuer '", "Logo for '",
+            "' waehlen", "' - choose",
+            "' gesetzt.", "' set.",
+            "Das Bild konnte nicht geladen werden: ", "The image could not be loaded: ",
+            "Eigenes Logo entfernt (es gilt wieder das Logo aus dem Manifest bzw. das Standard-Logo).", "Custom logo removed (the manifest logo or the default logo is used again).",
+            "Serverliste vom Betreiber aktualisiert (", "Server list updated by the operator (",
+            " Server).", " servers).",
+            // --- Server-Wechsel, Manifest
+            "Server gewaehlt: ", "Server selected: ",
+            "Kollektion in Steam oeffnen", "Open collection in Steam",
+            "Steam-Workshop-Kollektion: dort alles abonnieren, Steam laedt die Mods herunter.", "Steam Workshop collection: subscribe to everything there, Steam downloads the mods.",
+            "Kollektion geoeffnet: ", "Collection opened: ",
+            "In der Kollektion unten/oben auf 'Alle abonnieren' klicken, Steam laedt dann alle Mods herunter (Steam > Downloads).", "In the collection, click 'Subscribe to all' - Steam then downloads all mods (Steam > Downloads).",
+            "Danach Mods im Spiel (Mods-Menue) bzw. ueber die Server-Mod-Liste aktivieren, ZombieBuddy bei Bedarf ueber 'Nur ZombieBuddy installieren ...'.", "Then enable the mods in the game (Mods menu) or via the server mod list; install ZombieBuddy if needed via 'Install ZombieBuddy only ...'.",
+            "Kein Server vorhanden - oben auf '+ Server hinzufuegen' klicken und Name + Link eintragen.", "No server available - the operator has not configured one yet.",
+            "FEHLER: ", "ERROR: ",
+            "Fehler: ", "Error: ",
+            "Manifest nicht erreichbar: ", "Manifest not reachable: ",
+            "noch nicht installiert", "not installed yet",
+            "neues Paket", "new package",
+            " Mods kommen wieder aus dem Paket - Paket wird neu installiert.", " mods come from the package again - the package will be reinstalled.",
+            " Mods kommen wieder aus dem Paket", " mods come from the package again",
+            " Mods wechseln auf den Steam-Workshop", " mods switch to the Steam Workshop",
+            "Aktuelles Paket: ", "Current package: ",
+            "     Installiert: ", "     Installed: ",
+            "   (aktuell)", "   (up to date)",
+            "   -> Aktualisieren noetig: ", "   -> Update needed: ",
+            "Neu installieren", "Reinstall",
+            "Server: ", "Server: ",
+            // --- Installation
+            "Kein Download-Link im Manifest. Du kannst die ZIP auch manuell waehlen.", "No download link in the manifest. You can also choose the ZIP manually.",
+            "Project Zomboid wurde nicht gefunden. Ist es ueber Steam installiert?", "Project Zomboid was not found. Is it installed via Steam?",
+            "Project-Zomboid-Installation nicht gefunden.", "Project Zomboid installation not found.",
+            "Zomboid-Ordner: ", "Zomboid folder: ",
+            "Project Zomboid laeuft noch - bitte zuerst beenden.", "Project Zomboid is still running - please close it first.",
+            "Paket ist aktuell - gleiche nur die Workshop-Mods ab (kein Download noetig).", "Package is up to date - only syncing the Workshop mods (no download needed).",
+            "ZombieBuddy pruefen ...", "Checking ZombieBuddy ...",
+            "Freier Speicher auf ", "Free space on ",
+            "Paket bereits heruntergeladen, verwende Cache.", "Package already downloaded, using the cache.",
+            "Lade Paket ", "Downloading package ",
+            "Pruefe SHA256 ...", "Verifying SHA256 ...",
+            "Pruefsumme stimmt nicht - Download beschaedigt oder Link veraltet. Bitte erneut versuchen.", "Checksum mismatch - download corrupted or link outdated. Please try again.",
+            "Pruefsumme stimmt nicht", "Checksum mismatch",
+            "ZombieBuddy einrichten ...", "Setting up ZombieBuddy ...",
+            "WARNUNG - nicht im Paket enthalten (Server-Admin muss das Paket neu bauen): ", "WARNING - not in the package (the server admin must rebuild the package): ",
+            "manuell ", "manual ",
+            "Download-ZIP geloescht.", "Downloaded ZIP deleted.",
+            "FERTIG! ", "DONE! ",
+            " Mod-Ordner installiert.", " mod folders installed.",
+            "Wichtig: Falls du die Very-Far-Away-Collection auf Steam abonniert hast, deabonniere sie bitte selbst", "Important: if you subscribed to the Very Far Away collection on Steam, please unsubscribe from it yourself",
+            "(vorher gern als Backup in eine eigene Kollektion packen) - sonst kann der Server mit", "(feel free to save it as your own collection first) - otherwise the server may kick you with",
+            "\"File doesn't match the one on the server\" kicken. Details im Tab 'Info / Anleitung'.", "\"File doesn't match the one on the server\". Details in the 'Info / Guide' tab.",
+            " Mods laedt der Server ueber den Steam-Workshop.\r\n\r\n", " mods are loaded by the server through the Steam Workshop.\r\n\r\n",
+            "Du musst dafuer NICHTS abonnieren: Beim Beitreten laedt Project Zomboid diese Mods automatisch ueber Steam herunter ", "You do NOT need to subscribe to anything: when joining, Project Zomboid downloads these mods automatically via Steam ",
+            "(Steam muss laufen; beim ersten Mal bzw. nach Mod-Updates kann das ein paar Minuten dauern).\r\n\r\n", "(Steam must be running; the first time and after mod updates this can take a few minutes).\r\n\r\n",
+            "Kommt beim Beitreten \"Workshop item version is different\" oder \"File doesn't match\": Spiel komplett beenden, ", "If you get \"Workshop item version is different\" or \"File doesn't match\" when joining: close the game completely, ",
+            "Steam die Updates fertig laden lassen und neu verbinden.", "let Steam finish the updates and reconnect.",
+            "Mods ueber den Steam-Workshop", "Mods via the Steam Workshop",
+            "Spiel wird ueber Steam gestartet (Kollektion: Mods vorher dort abonnieren, im Spiel unter 'Mods' aktivieren) ...", "Starting the game via Steam (collection: subscribe to the mods there first, enable them in the game under 'Mods') ...",
+            "Deine Installation passt nicht zum Server (", "Your installation does not match the server (",
+            ").\r\nJetzt aktualisieren?", ").\r\nUpdate now?",
+            "Aktualisieren noetig", "Update needed",
+            "Server-Adresse in der Zwischenablage: ", "Server address in the clipboard: ",
+            "Spiel wird ueber Steam gestartet ...", "Starting the game via Steam ...",
+            " abgeschlossen.", " finished.",
+            "Entferne ", "Removing ",
+            " alte Mod-Ordner ...", " old mod folders ...",
+            "Entpacke ", "Extracting ",
+            " Mod-Ordner nach ", " mod folders to ",
+            " Mod-Ordner aus Zomboid\\mods entfernt - diese Mods laedt das Spiel jetzt ueber den Steam-Workshop des Servers.", " mod folders removed from Zomboid\\mods - the game now loads these mods through the server's Steam Workshop.",
+            "Keine Kurator-Konfiguration im Paket.", "No curator configuration in the package.",
+            "Kurator-Einstellungen: ", "Curator settings: ",
+            " Dateien nach ", " files to ",
+            " kopiert", " copied",
+            " (Backup von ", " (backup of ",
+            "Hauptmenue-Mods: ", "Main menu mods: ",
+            " steht schon in default.txt.", " is already in default.txt.",
+            " fuers Hauptmenue eingetragen (Pferde-Animationen). Backup in _launcher_backup\\...\\mods.", " added for the main menu (horse animations). Backup in _launcher_backup\\...\\mods.",
+            "WARNUNG - default.txt hat keinen mods-Block, Horse-Eintrag nicht gesetzt: ", "WARNING - default.txt has no mods block, Horse entry not set: ",
+            "WARNUNG - default.txt (Horse): ", "WARNING - default.txt (Horse): ",
+            "WARNUNG - ", "WARNING - ",
+            "ZombieBuddy.jar oder zbNative.dll fehlt im Paket.", "ZombieBuddy.jar or zbNative.dll is missing in the package.",
+            "ProjectZomboid64.json war schon passend.", "ProjectZomboid64.json was already correct.",
+            "ProjectZomboid64.json nicht gefunden in ", "ProjectZomboid64.json not found in ",
+            "ProjectZomboid64.json angepasst (", "ProjectZomboid64.json patched (",
+            "zbNative.dll aus dem Ordner: ", "zbNative.dll from folder: ",
+            "zbNative.dll (integriert, neben dem Launcher)", "zbNative.dll (built in, next to the launcher)",
+            "zbNative.dll (im Launcher eingebettet)", "zbNative.dll (embedded in the launcher)",
+            " nicht ladbar (", " cannot be loaded (",
+            "), nehme die integrierte.", "), using the built-in one.",
+            "Keine Java-Mods gefunden.", "No Java mods found.",
+            "ZombieBuddy-Freigaben: ", "ZombieBuddy approvals: ",
+            " Java-Mods geprueft, ", " Java mods checked, ",
+            " neu freigegeben.", " newly approved.",
+            "Berechne SHA256 ...", "Calculating SHA256 ...",
+            // --- Verbindung / Download
+            "Link liefert eine Webseite statt einer Datei", "Link returns a web page instead of a file",
+            "Der Link liefert eine Webseite statt einer Datei. Bitte einen Direkt-Download-Link verwenden.", "The link returns a web page instead of a file. Please use a direct download link.",
+            "Verbindung abgebrochen bei ", "Connection lost at ",
+            "Download-Versuch ", "Download attempt ",
+            " fehlgeschlagen: ", " failed: ",
+            "Unerwartete Dateigroesse: ", "Unexpected file size: ",
+            "Pruefe ", "Checking ",
+            "unbekannter Fehler", "unknown error",
+            "Launcher-Fehler (Details in VFALauncher_crash.log)", "Launcher error (details in VFALauncher_crash.log)",
+            // --- Launcher-Update
+            "Launcher-Update verfuegbar: v", "Launcher update available: v",
+            " (du hast v", " (you have v",
+            ") - hier klicken", ") - click here",
+            "Launcher-Update gefunden: v", "Launcher update found: v",
+            "Es ist kein Download-Link hinterlegt. Bitte die Workshop-Seite des Launchers oeffnen.", "No download link is set. Please open the launcher's page.",
+            "Die neue Launcher-Version herunterladen, installieren und neu starten?\r\n(Server-Liste, Logos und launcher.cfg bleiben erhalten.)", "Download, install and restart with the new launcher version?\r\n(Server list, logos and launcher.cfg are kept.)",
+            "Die heruntergeladene Datei ist keine gueltige Launcher-exe.", "The downloaded file is not a valid launcher exe.",
+            "Update fehlgeschlagen: ", "Update failed: ",
+            // --- Sprache
+            "Sprache / Language", "Language",
+            // --- ZombieBuddy-Fenster
+            "ZombieBuddy installieren", "Install ZombieBuddy",
+            "Version (GitHub-Releases von zed-0xff/ZombieBuddy):", "Version (GitHub releases of zed-0xff/ZombieBuddy):",
+            "Versionen neu laden", "Reload versions",
+            "Jar-Variante:", "Jar variant:",
+            "Original (Jar + DLL aus dem gewaehlten GitHub-Release)", "Original (jar + DLL from the selected GitHub release)",
+            "Compatibility-Fix (Workshop ", "Compatibility fix (Workshop ",
+            "Lade Versionen ...", "Loading versions ...",
+            " (Vorabversion)", " (pre-release)",
+            " Version(en) mit Jar + DLL gefunden.", " version(s) with jar + DLL found.",
+            "GitHub nicht erreichbar: ", "GitHub not reachable: ",
+            "Keine Version gewaehlt (GitHub nicht erreichbar?).", "No version selected (GitHub not reachable?).",
+            "Der Compatibility-Fix wurde nicht gefunden. Bitte Workshop-Item ", "The compatibility fix was not found. Please subscribe to Workshop item ",
+            " in Steam abonnieren (oder den Mod 'ZombieBuddyFix' nach Zomboid\\mods legen) und erneut versuchen.", " in Steam (or put the mod 'ZombieBuddyFix' into Zomboid\\mods) and try again.",
+            "Fix-Mod gefunden: ", "Fix mod found: ",
+            "Im Fix-Mod liegt keine zbNative.dll und GitHub ist nicht erreichbar.", "The fix mod contains no zbNative.dll and GitHub is not reachable.",
+            "zbNative.dll fehlt im Fix-Mod - lade die neueste vom GitHub ...", "zbNative.dll is missing in the fix mod - downloading the latest from GitHub ...",
+            "Lade ", "Downloading ",
+            "Unerwartete Dateigroessen (Jar ", "Unexpected file sizes (jar ",
+            " Bytes) - abgebrochen.", " bytes) - aborted.",
+            "=== FERTIG: ZombieBuddy (", "=== DONE: ZombieBuddy (",
+            ") ist installiert ===", ") is installed ===",
+            "ProjectZomboid64.json wurde mit -agentlib:zbNative gepatcht (Sicherung: ProjectZomboid64.json.vfa-backup). Damit startet der normale Steam-Start (Play) schon mit ZombieBuddy.", "ProjectZomboid64.json was patched with -agentlib:zbNative (backup: ProjectZomboid64.json.vfa-backup). The normal Steam start (Play) now already starts with ZombieBuddy.",
+            "NOCH ZU TUN / WICHTIG:", "STILL TO DO / IMPORTANT:",
+            "1) Steam-Startoptionen (nur noetig fuer den 'Alternate Launch' oder wenn du ZombieBuddy zusaetzlich ueber Steam erzwingen willst):", "1) Steam launch options (only needed for the 'Alternate Launch' or if you also want to force ZombieBuddy through Steam):",
+            "   Steam > Bibliothek > Project Zomboid > Rechtsklick > Eigenschaften > Allgemein > Startoptionen, dort eintragen:", "   Steam > Library > Project Zomboid > right-click > Properties > General > Launch options, enter:",
+            "   (Ohne Rueckfrage bei Java-Mods: -agentlib:zbNative=policy=allow-all --   |   nie neue Jars: -agentlib:zbNative=policy=deny-new --)", "   (Without asking for Java mods: -agentlib:zbNative=policy=allow-all --   |   never new jars: -agentlib:zbNative=policy=deny-new --)",
+            "   Dieses Programm aendert Steams Startoptionen NICHT selbst (dafuer muesste Steam beendet werden).", "   This program does NOT change Steam's launch options itself (Steam would have to be closed for that).",
+            "2) Mods mit Java-Teil (mod.info: javaJarFile) brauchen den Mod 'ZombieBuddy' in der Mod-Liste (require=\\ZombieBuddy).", "2) Mods with a Java part (mod.info: javaJarFile) need the mod 'ZombieBuddy' in the mod list (require=\\ZombieBuddy).",
+            "3) Beim ersten Start fragt ZombieBuddy bei jedem Java-Mod nach Freigabe - 'Ja' und 'dauerhaft' waehlen (gespeichert in %USERPROFILE%\\.zombie_buddy\\mod_approvals.json).", "3) On first start ZombieBuddy asks for approval for every Java mod - choose 'Yes' and 'permanent' (stored in %USERPROFILE%\\.zombie_buddy\\mod_approvals.json).",
+            "4) Nach einem Spiel-Update pruefen, ob ProjectZomboid64.json noch gepatcht ist (sonst hier erneut installieren).", "4) After a game update, check that ProjectZomboid64.json is still patched (otherwise install again here).",
+            "5) Rueckgaengig: ProjectZomboid64.json.vfa-backup nach ProjectZomboid64.json zurueckkopieren; ZombieBuddy.jar und zbNative.dll im Spielordner loeschen.", "5) Undo: copy ProjectZomboid64.json.vfa-backup back to ProjectZomboid64.json; delete ZombieBuddy.jar and zbNative.dll in the game folder.",
+            "Installieren", "Install",
+            "Schliessen", "Close",
+            "Neu laden", "Reload",
+        };
+
+        static void Build()
+        {
+            pairs = new List<KeyValuePair<string, string>>();
+            for (int i = 0; i + 1 < P.Length; i += 2) pairs.Add(new KeyValuePair<string, string>(P[i], P[i + 1]));
+            pairs.Sort((a, b) => b.Key.Length.CompareTo(a.Key.Length));
+        }
+
+        public static string T(string s)
+        {
+            if (!En || string.IsNullOrEmpty(s)) return s;
+            if (pairs == null) Build();
+            foreach (var kv in pairs)
+                if (s.IndexOf(kv.Key, StringComparison.Ordinal) >= 0) s = s.Replace(kv.Key, kv.Value);
+            return s;
+        }
+
+        // Beschriftungen eines Fensters uebersetzen; spaetere Text-Aenderungen (Label.Text = ...) werden mituebersetzt
+        static readonly HashSet<Control> hooked = new HashSet<Control>();
+        public static void Apply(Control root)
+        {
+            if (!En) return;
+            Hook(root);
+            foreach (Control c in root.Controls) Apply(c);
+        }
+        static void Hook(Control c)
+        {
+            if (c is TextBox || c is RichTextBox || c is ComboBox || c is NumericUpDown) return;
+            if (!hooked.Add(c)) return;
+            var t = T(c.Text); if (t != c.Text) c.Text = t;
+            c.TextChanged += (s, e) => { var x = T(c.Text); if (x != c.Text) c.Text = x; };
+        }
+
+        // MessageBox mit Uebersetzung
+        public static DialogResult Show(string text, string caption) { return MessageBox.Show(T(text), T(caption)); }
+        public static DialogResult Show(IWin32Window o, string text, string caption) { return MessageBox.Show(o, T(text), T(caption)); }
+        public static DialogResult Show(IWin32Window o, string text, string caption, MessageBoxButtons b) { return MessageBox.Show(o, T(text), T(caption), b); }
+        public static DialogResult Show(IWin32Window o, string text, string caption, MessageBoxButtons b, MessageBoxIcon i) { return MessageBox.Show(o, T(text), T(caption), b, i); }
+        public static DialogResult Show(string text, string caption, MessageBoxButtons b, MessageBoxIcon i) { return MessageBox.Show(T(text), T(caption), b, i); }
     }
 
     // ------------------------------------------------------------------ Hilfen
@@ -1310,6 +1567,11 @@ namespace VFALauncher
             AddPage(nav, content, "Spielen", BuildPlayTab());
             AddPage(nav, content, "Info / Anleitung", BuildInfoTab());
             if (dev) AddPage(nav, content, "DEV", BuildDevTab());
+            var cbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, Margin = new Padding(40, 2, 0, 0) };
+            cbLang.Items.AddRange(new object[] { "Deutsch", "English" });
+            cbLang.SelectedIndex = Loc.En ? 1 : 0;
+            cbLang.SelectedIndexChanged += (s, e) => ChangeLang(cbLang.SelectedIndex == 1);
+            nav.Controls.Add(cbLang);
             ShowPage(0);
             // gemeinsamer Log-Bereich unten (fuer Spielen- UND DEV-Tab)
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 240, Padding = new Padding(8), BackColor = BgPanel };
@@ -1339,14 +1601,23 @@ namespace VFALauncher
             Controls.Add(credit);
             try { var old = Path.Combine(Util.ExeDir, "majestiKLauncher.exe.old"); if (File.Exists(old)) File.Delete(old); } catch { }
             ApplyTheme(this);
+            Loc.Apply(this);
             ApplyLogo();
             Shown += (s, e) =>
             {
-                ApplyDevFields(); RefreshManifest(); CheckLauncherUpdate();
+                ApplyDevFields(); RefreshManifest(); CheckLauncherUpdate(); if (!devMode) SyncServerList();
                 updTimer = new System.Windows.Forms.Timer { Interval = 30 * 60 * 1000 };   // Update-Pruefung auch bei laenger offenem Launcher
                 updTimer.Tick += (s2, e2) => { if (!lblUpdate.Visible) CheckLauncherUpdate(); };
                 updTimer.Start();
             };
+        }
+
+        void ChangeLang(bool en)
+        {
+            if (en == Loc.En) return;
+            Loc.Save(en);
+            if (MessageBox.Show(this, "Launcher neu starten, damit die Sprache wechselt?\r\nRestart the launcher to change the language?", "Sprache / Language", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            try { Process.Start(Application.ExecutablePath, devMode ? "--dev" : ""); Application.Exit(); } catch { }
         }
 
         void AddPage(FlowLayoutPanel nav, Panel content, string title, Panel page)
@@ -1437,6 +1708,8 @@ namespace VFALauncher
             new ToolTip().SetToolTip(btnLogoX, "Eigenes Logo entfernen");
             btnLogo.Click += (s, e) => ChooseLogo();
             btnLogoX.Click += (s, e) => ClearLogo();
+            btnAddSrv.Visible = btnDelSrv.Visible = btnLogo.Visible = btnLogoX.Visible = devMode;   // Server verwalten + Logo aendern nur im DEV-Modus
+            if (!devMode) cbServer.Width = 600;
             p.Controls.AddRange(new Control[] { lblSrv, cbServer, btnAddSrv, btnDelSrv, btnLogo, btnLogoX });
             return p;
         }
@@ -1446,6 +1719,7 @@ namespace VFALauncher
             var p = new Panel { Padding = new Padding(10) };
             var tb = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 9.5f), BackColor = Color.White };
             var path = Path.Combine(Util.ExeDir, "launcher_info.txt");
+            if (Loc.En && File.Exists(Path.Combine(Util.ExeDir, "launcher_info_en.txt"))) path = Path.Combine(Util.ExeDir, "launcher_info_en.txt");
             tb.Text = File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8).Replace("\r\n", "\n").Replace("\n", "\r\n") : "launcher_info.txt fehlt neben der EXE.";
             p.Controls.Add(tb);
             return p;
@@ -1525,6 +1799,8 @@ namespace VFALauncher
             b6.Click += (s, e) => DevServerIni(); p.Controls.Add(b6);
             var b9 = new Button { Text = "Mod-Liste / Workshop-Auswahl ...", Location = new Point(530, y), Width = 260 };
             b9.Click += (s, e) => DevModList(); p.Controls.Add(b9); y += 34;
+            var b10 = new Button { Text = "Serverliste fuer Spieler speichern (servers.json) ...", Location = new Point(200, y), Width = 320 };
+            b10.Click += (s, e) => DevExportServers(); p.Controls.Add(b10); y += 34;
             lblWs = new Label { Location = new Point(200, y), AutoSize = true }; p.Controls.Add(lblWs); y += 30;
 
             p.Controls.Add(new Label { Text = "5) ZombieBuddy - zbNative.dll (wird ueber das Manifest an alle verteilt)", Font = new Font(Font, FontStyle.Bold), Location = new Point(10, y), AutoSize = true }); y += 26;
@@ -1739,7 +2015,7 @@ namespace VFALauncher
                 File.WriteAllLines(path, rep, Encoding.UTF8);
                 foreach (var l in rep.Take(60)) AppendLog(l);
                 AppendLog("Kompletter Bericht: " + path);
-                BeginInvoke((Action)(() => MessageBox.Show(this, rep[2] + "\r\n\r\nBericht: " + path, "Pruefung fertig")));
+                BeginInvoke((Action)(() => Loc.Show(this, rep[2] + "\r\n\r\nBericht: " + path, "Pruefung fertig")));
             });
         }
 
@@ -1931,12 +2207,12 @@ namespace VFALauncher
 
         void InstallLauncherUpdate()
         {
-            if (updUrl == "") { MessageBox.Show(this, "Es ist kein Download-Link hinterlegt. Bitte die Workshop-Seite des Launchers oeffnen.", "Launcher-Update"); return; }
+            if (updUrl == "") { Loc.Show(this, "Es ist kein Download-Link hinterlegt. Bitte die Workshop-Seite des Launchers oeffnen.", "Launcher-Update"); return; }
             try
             {
                 var path = updUrl.Split('?')[0];
                 if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) { Process.Start(updUrl); return; }   // Webseite -> im Browser oeffnen
-                if (MessageBox.Show(this, "Die neue Launcher-Version herunterladen, installieren und neu starten?\r\n(Server-Liste, Logos und launcher.cfg bleiben erhalten.)", "Launcher-Update", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+                if (Loc.Show(this, "Die neue Launcher-Version herunterladen, installieren und neu starten?\r\n(Server-Liste, Logos und launcher.cfg bleiben erhalten.)", "Launcher-Update", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
                 var dstDir = Util.ExeDir.TrimEnd('\\');
                 var tmp = Path.Combine(Util.DataDir, "majestiKLauncher_new.exe");
                 Downloader.GetFile(updUrl, tmp);
@@ -1954,7 +2230,7 @@ namespace VFALauncher
                 Process.Start(dst, devMode ? "--dev" : "");
                 Application.Exit();
             }
-            catch (Exception ex) { MessageBox.Show(this, "Update fehlgeschlagen: " + ex.Message, "Launcher-Update"); }
+            catch (Exception ex) { Loc.Show(this, "Update fehlgeschlagen: " + ex.Message, "Launcher-Update"); }
         }
 
         // ---------- Mehrere Server
@@ -1977,10 +2253,10 @@ namespace VFALauncher
                 while (f.ShowDialog(this) == DialogResult.OK)
                 {
                     var name = f.tName.Text.Trim(); var url = f.tUrl.Text.Trim();
-                    if (name == "" || url == "") { MessageBox.Show(this, "Bitte Name und Link eingeben.", "Server hinzufuegen"); continue; }
+                    if (name == "" || url == "") { Loc.Show(this, "Bitte Name und Link eingeben.", "Server hinzufuegen"); continue; }
                     if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("steam://", StringComparison.OrdinalIgnoreCase))
-                    { MessageBox.Show(this, "Der Link muss mit https:// beginnen.", "Server hinzufuegen"); continue; }
-                    if (servers.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) { MessageBox.Show(this, "Einen Server mit diesem Namen gibt es schon.", "Server hinzufuegen"); continue; }
+                    { Loc.Show(this, "Der Link muss mit https:// beginnen.", "Server hinzufuegen"); continue; }
+                    if (servers.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) { Loc.Show(this, "Einen Server mit diesem Namen gibt es schon.", "Server hinzufuegen"); continue; }
                     var kind = ServerEntry.LooksLikeSteam(url) ? "collection" : "manifest";
                     if (kind == "manifest")
                     {
@@ -1992,10 +2268,11 @@ namespace VFALauncher
                         }
                         catch (Exception ex)
                         {
-                            if (MessageBox.Show(this, "Der Link ist als Manifest nicht lesbar:\r\n" + ex.Message + "\r\n\r\nTrotzdem speichern?", "Server hinzufuegen", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) continue;
+                            if (Loc.Show(this, "Der Link ist als Manifest nicht lesbar:\r\n" + ex.Message + "\r\n\r\nTrotzdem speichern?", "Server hinzufuegen", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) continue;
                         }
                     }
-                    var e2 = new ServerEntry { Name = name, Url = url, Kind = kind, Slug = ServerEntry.MakeSlug(name, servers.Select(x => x.Slug)) };
+                    var e2 = new ServerEntry { Name = name, Url = url, Kind = kind, Slug = ServerEntry.MakeSlug(name, servers.Select(x => x.Slug)), LogoUrl = f.tLogo.Text.Trim() };
+                    if (e2.LogoUrl != "") e2.Logo = DownloadListLogo(e2.LogoUrl, url);
                     servers.Add(e2); cbServer.Items.Add(e2);
                     ServerStore.Save(servers, e2.Slug);
                     cbServer.SelectedItem = e2;   // loest SwitchServer aus
@@ -2005,10 +2282,101 @@ namespace VFALauncher
             }
         }
 
+        // ---------- Zentrale Serverliste: Spieler koennen keine Server hinzufuegen/entfernen, der Betreiber pflegt servers.json online
+        const string DEFAULT_SERVERLIST_URL = "https://raw.githubusercontent.com/T0XiQ96/majestiKLauncher/main/servers.json";
+
+        static string DownloadListLogo(string logoUrl, string key)
+        {
+            try
+            {
+                var dir = Path.Combine(Util.BaseDataDir, "logos"); Directory.CreateDirectory(dir);
+                var f = Path.Combine(dir, "list_" + Util.Sha256String(key).Substring(0, 12) + ".img");
+                var tmp = f + ".tmp"; if (File.Exists(tmp)) File.Delete(tmp);
+                Downloader.GetFile(logoUrl, tmp);
+                var len = new FileInfo(tmp).Length;
+                if (len < 100 || len > 8 * 1024 * 1024) { File.Delete(tmp); return ""; }
+                using (LoadImageNoLock(tmp)) { }
+                if (File.Exists(f)) File.Delete(f);
+                File.Move(tmp, f);
+                return f;
+            }
+            catch { return ""; }
+        }
+
+        void SyncServerList()
+        {
+            var src = Util.S(cfg, "serverListUrl"); if (src == "") src = DEFAULT_SERVERLIST_URL;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    var txt = Downloader.GetString(src + (src.Contains("?") ? "&" : "?") + "nocache=" + DateTime.UtcNow.Ticks);
+                    var items = new List<ServerEntry>(); var logos = new Dictionary<string, string>();
+                    foreach (var d in Util.L2(Util.Json.Deserialize<Dictionary<string, object>>(txt), "servers"))
+                    {
+                        var n = Util.S(d, "name"); var u = Util.S(d, "url");
+                        if (n == "" || u == "") continue;
+                        var it = new ServerEntry { Name = n, Url = u, LogoUrl = Util.S(d, "logoUrl"), Kind = ServerEntry.LooksLikeSteam(u) ? "collection" : "manifest" };
+                        items.Add(it);
+                        if (it.LogoUrl != "") { var lp = DownloadListLogo(it.LogoUrl, u); if (lp != "") logos[u] = lp; }
+                    }
+                    if (items.Count == 0) return;
+                    BeginInvoke((Action)(() => ApplyServerList(items, logos)));
+                }
+                catch { }
+            });
+        }
+
+        void ApplyServerList(List<ServerEntry> items, Dictionary<string, string> logos)
+        {
+            bool changed = false, logoChanged = false;
+            var keep = new HashSet<string>(items.Select(x => x.Url), StringComparer.OrdinalIgnoreCase);
+            foreach (var it in items)
+            {
+                var ex = servers.FirstOrDefault(x => x.Url.Equals(it.Url, StringComparison.OrdinalIgnoreCase));
+                string lg; logos.TryGetValue(it.Url, out lg);
+                if (ex == null)
+                {
+                    it.Slug = ServerEntry.MakeSlug(it.Name, servers.Select(x => x.Slug)); it.Remote = true; it.Logo = lg ?? "";
+                    servers.Add(it); changed = true;
+                    continue;
+                }
+                if (!ex.Remote || ex.Name != it.Name || ex.Kind != it.Kind || ex.LogoUrl != it.LogoUrl) changed = true;
+                ex.Remote = true; ex.Name = it.Name; ex.Kind = it.Kind; ex.LogoUrl = it.LogoUrl;
+                if (lg != null && ex.Logo != lg) { ex.Logo = lg; changed = true; if (ex == curServer) logoChanged = true; }
+                else if (lg == null && it.LogoUrl == "" && ex.Logo.IndexOf("list_", StringComparison.Ordinal) >= 0) { ex.Logo = ""; changed = true; if (ex == curServer) logoChanged = true; }
+            }
+            foreach (var gone in servers.Where(x => x.Remote && !keep.Contains(x.Url) && x != curServer).ToList()) { servers.Remove(gone); changed = true; }
+            if (!changed) return;
+            switching = true;
+            cbServer.Items.Clear(); foreach (var sv in servers) cbServer.Items.Add(sv);
+            if (servers.Contains(curServer)) cbServer.SelectedItem = curServer;
+            switching = false;
+            ServerStore.Save(servers, curServer.Slug);
+            AppendLog("Serverliste vom Betreiber aktualisiert (" + servers.Count + " Server).");
+            if (curServer == NoServer && servers.Count > 0) cbServer.SelectedItem = servers[0];   // loest SwitchServer aus
+            else if (logoChanged) ApplyLogo();
+        }
+
+        void DevExportServers()
+        {
+            var list = new List<object>();
+            foreach (var e in servers)
+            {
+                var d = new Dictionary<string, object> { { "name", e.Name }, { "url", e.Url } };
+                if (e.LogoUrl != "") d["logoUrl"] = e.LogoUrl;
+                list.Add(d);
+            }
+            var path = Path.Combine(Util.ExeDir, "servers.json");
+            Util.WriteJson(path, new Dictionary<string, object> { { "servers", list } });
+            SetStatus("Gespeichert: " + path);
+            AppendLog("servers.json gespeichert: " + path + "  -> in GitHub (Repo-Hauptordner) hochladen, dann sehen alle Spieler diese Serverliste.");
+        }
+
         void RemoveServer()
         {
             if (curServer == null || !servers.Contains(curServer)) return;
-            if (MessageBox.Show(this, "'" + curServer.Name + "' aus der Liste entfernen?\r\n(Bereits installierte Mods bleiben im Spielordner.)", "Server entfernen", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            if (Loc.Show(this, "'" + curServer.Name + "' aus der Liste entfernen?\r\n(Bereits installierte Mods bleiben im Spielordner.)", "Server entfernen", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
             var gone = curServer; servers.Remove(gone);
             switching = true; cbServer.Items.Remove(gone); switching = false;
             var next = servers.FirstOrDefault() ?? NoServer;
@@ -2048,7 +2416,7 @@ namespace VFALauncher
 
         void ChooseLogo()
         {
-            if (curServer == null || !servers.Contains(curServer)) { MessageBox.Show(this, "Zuerst einen Server auswaehlen oder hinzufuegen.", "Logo"); return; }
+            if (curServer == null || !servers.Contains(curServer)) { Loc.Show(this, "Zuerst einen Server auswaehlen oder hinzufuegen.", "Logo"); return; }
             using (var d = new OpenFileDialog { Filter = "Bilder (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif", Title = "Logo fuer '" + curServer.Name + "' waehlen" })
             {
                 if (d.ShowDialog(this) != DialogResult.OK) return;
@@ -2061,7 +2429,7 @@ namespace VFALauncher
                     curServer.Logo = dst; ServerStore.Save(servers, curServer.Slug);
                     ApplyLogo(); AppendLog("Logo fuer '" + curServer.Name + "' gesetzt.");
                 }
-                catch (Exception ex) { MessageBox.Show(this, "Das Bild konnte nicht geladen werden: " + ex.Message, "Logo"); }
+                catch (Exception ex) { Loc.Show(this, "Das Bild konnte nicht geladen werden: " + ex.Message, "Logo"); }
             }
         }
 
@@ -2195,7 +2563,7 @@ namespace VFALauncher
             if (curServer != null && curServer.IsCollection) { OpenCollection(); return; }
             if (localZip == null && (manifest == null || Util.S(manifest, "packUrl") == ""))
             {
-                MessageBox.Show(this, "Kein Download-Link im Manifest. Du kannst die ZIP auch manuell waehlen.", "Hinweis");
+                Loc.Show(this, "Kein Download-Link im Manifest. Du kannst die ZIP auch manuell waehlen.", "Hinweis");
                 return;
             }
             SavePrefs();
@@ -2287,7 +2655,7 @@ namespace VFALauncher
         void WorkshopInfo(int n)
         {
             if (n == 0) return;
-            MessageBox.Show(this,
+            Loc.Show(this,
                 n + " Mods laedt der Server ueber den Steam-Workshop.\r\n\r\n" +
                 "Du musst dafuer NICHTS abonnieren: Beim Beitreten laedt Project Zomboid diese Mods automatisch ueber Steam herunter " +
                 "(Steam muss laufen; beim ersten Mal bzw. nach Mod-Updates kann das ein paar Minuten dauern).\r\n\r\n" +
@@ -2309,7 +2677,7 @@ namespace VFALauncher
                 var why = UpdateReason();
                 if (why != null)
                 {
-                    if (MessageBox.Show(this, "Deine Installation passt nicht zum Server (" + why + ").\r\nJetzt aktualisieren?", "Aktualisieren noetig",
+                    if (Loc.Show(this, "Deine Installation passt nicht zum Server (" + why + ").\r\nJetzt aktualisieren?", "Aktualisieren noetig",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) RunInstall(null);
                     return;
                 }
@@ -2364,7 +2732,7 @@ namespace VFALauncher
         void AppendLog(string s)
         {
             if (InvokeRequired) { BeginInvoke((Action<string>)AppendLog, s); return; }
-            log.AppendText(s + "\r\n");
+            log.AppendText(Loc.T(s) + "\r\n");
             try { File.AppendAllText(Path.Combine(Util.DataDir, "launcher.log"), DateTime.Now.ToString("s") + " " + s + "\r\n"); } catch { }
         }
 
@@ -2391,13 +2759,14 @@ namespace VFALauncher
         void SetStatus(string s)
         {
             if (InvokeRequired) { BeginInvoke((Action<string>)SetStatus, s); return; }
-            status.Text = s;
+            status.Text = Loc.T(s);
         }
     }
 
     // ------------------------------------------------------------------ Nur ZombieBuddy installieren
     class ZbForm : Form
     {
+        protected override void OnLoad(EventArgs e) { base.OnLoad(e); Loc.Apply(this); }
         const string FIX_WID = "3809837933";
         ComboBox cbVer, cbVar; NumericUpDown numRam; TextBox log; Button bLoad, bInst; Label lblStat;
         readonly Dictionary<string, string[]> rel = new Dictionary<string, string[]>(); // Tag -> {jarUrl, dllUrl}
@@ -2475,8 +2844,8 @@ namespace VFALauncher
         {
             var useFix = cbVar.SelectedIndex == 1; var ram = (int)numRam.Value;
             var verKey = cbVer.SelectedItem as string;
-            if (!useFix && (verKey == null || !rel.ContainsKey(verKey))) { MessageBox.Show(this, "Keine Version gewaehlt (GitHub nicht erreichbar?).", "ZombieBuddy"); return; }
-            if (Process.GetProcessesByName("ProjectZomboid64").Length > 0) { MessageBox.Show(this, "Project Zomboid laeuft noch - bitte zuerst beenden.", "ZombieBuddy"); return; }
+            if (!useFix && (verKey == null || !rel.ContainsKey(verKey))) { Loc.Show(this, "Keine Version gewaehlt (GitHub nicht erreichbar?).", "ZombieBuddy"); return; }
+            if (Process.GetProcessesByName("ProjectZomboid64").Length > 0) { Loc.Show(this, "Project Zomboid laeuft noch - bitte zuerst beenden.", "ZombieBuddy"); return; }
             bInst.Enabled = false; bLoad.Enabled = false;
             var urls = useFix ? null : rel[verKey];
             var firstRel = rel.Values.FirstOrDefault();
@@ -2610,7 +2979,7 @@ namespace VFALauncher
             lv.ColumnClick += (s, e) => { asc = sortCol == e.Column ? !asc : true; sortCol = e.Column; Sort(e.Column, asc); };
 
             Controls.Add(lv); Controls.Add(bottom); Controls.Add(top);
-            owner.ApplyTheme(this);
+            owner.ApplyTheme(this); Loc.Apply(this);
             search.TextChanged += (s, e) => Fill();
             filter.SelectedIndexChanged += (s, e) => Fill();
             Fill();
@@ -2662,7 +3031,7 @@ namespace VFALauncher
             var msg = e == null ? "unbekannter Fehler" : e.ToString();
             try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "VFALauncher_crash.log"), DateTime.Now.ToString("s") + "\r\n" + msg + "\r\n\r\n"); } catch { }
             try { File.AppendAllText(Path.Combine(Util.ExeDir, "VFALauncher_crash.log"), DateTime.Now.ToString("s") + "\r\n" + msg + "\r\n\r\n"); } catch { }
-            try { MessageBox.Show(msg, "Launcher-Fehler (Details in VFALauncher_crash.log)", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
+            try { Loc.Show(msg, "Launcher-Fehler (Details in VFALauncher_crash.log)", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
         }
 
         [STAThread]
@@ -2680,6 +3049,7 @@ namespace VFALauncher
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             bool dev = args.Any(a => a.Equals("--dev", StringComparison.OrdinalIgnoreCase)) || File.Exists(Path.Combine(Util.ExeDir, "dev.flag"));
+            Loc.Init();
             Application.Run(new MainForm(dev));
         }
     }

@@ -1,0 +1,129 @@
+majestiK Launcher - TUTORIAL FOR SERVER OPERATORS (DEV)
+=========================================================
+(Deutsche Version: DEV_TUTORIAL_DE.txt)
+
+GOAL
+----
+You run a Project Zomboid (Build 42) server with many mods. Instead of every player loading everything through the Steam
+Workshop (and suddenly having a different state after each mod update), you bundle the mods ONCE into a fixed package.
+Players install exactly that package with the launcher - until YOU publish a new one.
+
+OVERVIEW
+--------
+  A) Start the launcher in DEV mode
+  B) Build the mod package (MODS folder) and pack it as a ZIP
+  C) Upload the ZIP (direct download link)
+  D) Create and upload the manifest (tells the launchers: latest version, download link, server address, ...)
+  E) Define the server list your players see (the dropdown)
+  F) Update the server INI (Mods=, Map=) and run the server with the same mods
+  G) Assemble the player package and hand it out
+  H) Later: publish an update
+
+A) START DEV MODE
+-----------------
+Double-click  "Launcher DEV.bat"  (next to majestiKLauncher.exe). Alternatively a shortcut to majestiKLauncher.exe with the
+parameter  --dev.  In DEV mode you see the "DEV" tab and the buttons "+ Add server", "Remove" and "Logo ..." - players
+(normal start) do NOT see these. The "DEV" tab always applies to the server selected at the top. Every server has its own
+DEV settings (stored in the "dev" folder next to the exe).
+The DEV tab itself is in German; the field names are explained below.
+
+Add a server: "+ Add server" -> name and link:
+  * Link to a manifest.json (see D) = server with a mod package
+  * Link to a Steam Workshop collection = players are sent to the collection ("Subscribe to all")
+  * optional logo link (image) that all players see. "Logo ..." sets a logo only for you, locally.
+"Remove" deletes the selected server from your list (even the preinstalled ones - you can enter completely your own).
+
+B) BUILD THE MOD PACKAGE (DEV tab, section 1)
+---------------------------------------------
+You need the mods locally in the Steam Workshop folder (subscribe, or download with steamcmd).
+Fields:
+  * Workshop-Ordner (108600)   e.g.  ...\steamapps\workshop\content\108600
+  * Packliste (Workshop-IDs)   text file, one Workshop ID per line = which mods go into the package
+  * modid.txt                  mod IDs in the desired LOAD ORDER (one per line)
+  * mapid.txt                  map folders (mod maps first, "Muldraugh, KY" last)
+  * Kurator-Zomboid-Ordner     optional: a Zomboid folder with your mod settings/presets that players should adopt
+  * Ziel MODS-Ordner           the build target (IS COMPLETELY EMPTIED and refilled!)
+  * steamcmd.exe (optional)    so missing Workshop items are downloaded automatically
+  * Checkbox "Weitere Workshop-Items mitpacken": also packs Workshop folders that are NOT in the pack list
+Own mods: put finished mod folders into the folder "Eigene Mods" - they are copied 1:1 and appended to the end of Mods=.
+Buttons:
+  * "Nur pruefen (Abhaengigkeiten)"  -> report: missing mods, missing require=, incompatibilities, order, maps
+  * "MODS-Ordner bauen"              -> copies all mods into the target folder
+
+"Mod-Liste / Workshop-Auswahl" (section 4): tick single mods that should NOT be in the package but loaded by the server through
+the Steam Workshop (WorkshopItems=). This makes the package smaller.
+
+C) PACK THE ZIP AND UPLOAD IT (section 2)
+-----------------------------------------
+Field "ZIP-Datei" = output file. "ZIP packen + SHA256" creates the ZIP and its checksum (SHA256).
+Upload the ZIP somewhere with a DIRECT download link: e.g. a GitHub release, your own web server, gofile, SwissTransfer,
+pixeldrain, Google Drive/Dropbox (the launcher can resolve these pages). With your own web server/GitHub the link is
+permanent - better than hosts with an expiry date.
+
+D) CREATE AND UPLOAD THE MANIFEST (section 3)
+---------------------------------------------
+The manifest (manifest.json) is a small text file the launcher fetches regularly. Fields:
+  * Manifest-Link (dieser Server)  = the internet address where YOU upload manifest.json (direct link!)
+        e.g. a GitHub Gist "raw" link without commit hash, a file in a GitHub repo (raw.githubusercontent.com/...),
+        or your web server. This address never changes; only the content changes on updates.
+  * Version                  free choice (e.g. 2026.10.02-1). When it changes, all players see "Update needed".
+  * Download-Link            link to the ZIP from C)
+  * SHA256                   checksum of the ZIP (determined by "ZIP packen")
+  * Server-IP / Port / Passwort   the launcher copies the address to the clipboard on "Play"
+  * Nachricht an Spieler     short notice shown to players
+  * Logo-Link                image URL; shown at the top to all players for this server
+Then "manifest.json speichern" (or "In Zwischenablage") and upload the file to the manifest address
+(GitHub: replace the file in the repo / edit the gist). Once it is online, players see the update at their next start.
+"DEV-Einstellungen speichern" remembers all fields for this server.
+
+E) SERVER LIST FOR PLAYERS
+--------------------------
+Players cannot add or delete servers themselves. You decide what they see:
+  1. In DEV mode enter all wanted servers (see A). "Remove" the unwanted ones.
+  2. DEV tab, section 4: "Serverliste fuer Spieler speichern (servers.json)". This creates a servers.json:
+        { "servers": [ { "name": "My Server", "url": "https://.../manifest.json", "logoUrl": "https://.../logo.png" } ] }
+  3. Upload servers.json somewhere with a direct link (e.g. the main folder of your GitHub repo).
+  4. Enter that address as  "serverListUrl"  in the launcher.cfg you give your players:
+        { "title": "My Server", "manifestUrl": "https://.../manifest.json", "serverListUrl": "https://.../servers.json" }
+The launcher fetches the list at every start and syncs it: new servers appear, removed ones disappear, names and logos are
+updated. You can change the list at any time without sending anything to your players.
+"title" + "manifestUrl" in launcher.cfg are the start server for the very first start (in case the list cannot be fetched).
+
+F) SERVER INI AND SERVER
+------------------------
+DEV tab, section 4: "Server-INI aktualisieren (Mods=, Map=) ..." selects your server INI (Zomboid\Server\<name>.ini) and writes
+Mods= (Build 42 format \ModID;\ModID), Map= and WorkshopItems= (with backup). Own mods are at the end.
+The server needs the same mods as the package: extract the ZIP contents to <server user>\Zomboid\mods\ (except mods you let load via
+WorkshopItems= - delete their folders there). For Java mods also set up ZombieBuddy on the server
+(Linux: -javaagent:ZombieBuddy.jar=policy=allow-all, Windows: -agentlib:zbNative). With every mod update, server AND players
+must have the same package - so update the server first, then publish the manifest with the new version.
+
+ZombieBuddy preset (section 5): fetch the matching zbNative.dll from GitHub here and distribute it through the manifest.
+
+G) ASSEMBLE THE PLAYER PACKAGE
+------------------------------
+This is what your players get (as a ZIP, e.g. a GitHub release or your Discord):
+    majestiKLauncher.exe
+    majestiKLauncher.exe.config
+    launcher.cfg                 (with your start server and serverListUrl, see E)
+    launcher_info.txt            (German info/guide)
+    launcher_info_en.txt         (English info/guide)
+Do NOT hand out (the public download contains the DEV.bat for convenience - remove it from your own player package): "Launcher DEV.bat", the "dev" folder, a manifest.json containing passwords, your pack lists.
+Anyone who just runs the launcher (without --dev) sees the normal player mode: choose server, Install/Update, Play.
+The launcher updates itself (green notice at the bottom) when a new launcher version is released.
+
+H) PUBLISH AN UPDATE
+--------------------
+  1. Adjust mods in the pack list/modid.txt, "Nur pruefen", then "MODS-Ordner bauen"
+  2. "ZIP packen + SHA256", upload the new ZIP
+  3. Enter version, download link, SHA256 in the manifest, "manifest.json speichern", upload the file to the manifest address
+  4. Bring the server to the same state (server INI + mods) and restart it
+All players see "Update needed" at their next start (or when clicking the server).
+
+TIPS / PROBLEMS
+---------------
+  * The target folder "MODS" is completely emptied on build - never choose a folder containing your own files.
+  * Download breaks / host blocked: players can download the ZIP in a browser and use "Choose ZIP manually ...".
+  * Logs: %LocalAppData%\VFALauncher\launcher.log and VFALauncher_crash.log next to the exe.
+  * On the player's PC the launcher only changes: Zomboid\mods, ProjectZomboid64.json (with backup), ZombieBuddy.jar/zbNative.dll in the
+    game folder, Zomboid\mods\default.txt (Horse mod, if in the package) - each with a backup.
