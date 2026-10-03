@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.3.0")]
 
 namespace VFALauncher
 {
@@ -316,6 +316,14 @@ namespace VFALauncher
             "Installieren", "Install",
             "Schliessen", "Close",
             "Neu laden", "Reload",
+            "Google Drive: Download-Limit fuer diese Datei erreicht (Quota exceeded). Das Limit setzt sich meist nach ca. 24 Stunden zurueck - bitte spaeter erneut versuchen oder den Betreiber um einen anderen Download-Link bitten.", "Google Drive: the download limit for this file has been reached (quota exceeded). The limit usually resets after about 24 hours - please try again later or ask the operator for another download link.",
+            "Google Drive verlangt eine Bestaetigung (Virenpruefung) und liefert keine Datei. Bitte den Betreiber um einen anderen Download-Link bitten.", "Google Drive requires a confirmation (virus scan) and does not deliver a file. Please ask the operator for another download link.",
+            " Version(en) gefunden (ohne eigene DLL: DLL der aelteren Version).", " version(s) found (without their own DLL: DLL of the older version).",
+            " (dieses Release bringt keine eigene DLL mit)", " (this release does not include its own DLL)",
+            "zbNative.dll aus ", "zbNative.dll from ",
+            "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? Waehle die Variante:", "ZombieBuddy (Java mods) was detected but is not set up.\r\nInstall it now? Choose a variant:",
+            "Neueste Version von GitHub (ohne Fix)\r\n(ZombieBuddy v2.3.4 oder neuer)", "Latest version from GitHub (no fix)\r\n(ZombieBuddy v2.3.4 or newer)",
+            "Neueste Version + Fix:\r\n", "Latest version + fix:\r\n",
             "Original: ZombieBuddy (Workshop 3619862853) - Jar + DLL aus dem gewaehlten GitHub-Release", "Original: ZombieBuddy (Workshop 3619862853) - jar + DLL from the selected GitHub release",
             "Fix: [PATCH] ZombieBuddy (Workshop ", "Fix: [PATCH] ZombieBuddy (Workshop ",
             ") - Jar + DLL aus dem Fix-Mod", ") - jar + DLL from the fix mod",
@@ -597,6 +605,8 @@ namespace VFALauncher
     }
 
     // ------------------------------------------------------------------ Downloads (direkt + gofile)
+    class DownloadBlockedException : Exception { public DownloadBlockedException(string m) : base(m) { } }
+
     class Downloader
     {
         public Action<string> Log = s => { };
@@ -625,13 +635,30 @@ namespace VFALauncher
                 return sr.ReadToEnd();
         }
 
+        // Antwort ist eine Webseite statt einer Datei: Ursache erklaeren (Google Drive Quota, Virenpruefung, ...)
+        static string HtmlProblem(HttpWebResponse resp)
+        {
+            string body = "";
+            try
+            {
+                using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                { var buf = new char[60000]; int n = sr.Read(buf, 0, buf.Length); body = new string(buf, 0, n); }
+            }
+            catch { }
+            if (body.IndexOf("Quota exceeded", StringComparison.OrdinalIgnoreCase) >= 0 || body.IndexOf("Too many users have viewed or downloaded", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Google Drive: Download-Limit fuer diese Datei erreicht (Quota exceeded). Das Limit setzt sich meist nach ca. 24 Stunden zurueck - bitte spaeter erneut versuchen oder den Betreiber um einen anderen Download-Link bitten.";
+            if (body.IndexOf("virus", StringComparison.OrdinalIgnoreCase) >= 0 && body.IndexOf("Google Drive", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Google Drive verlangt eine Bestaetigung (Virenpruefung) und liefert keine Datei. Bitte den Betreiber um einen anderen Download-Link bitten.";
+            return "Der Link liefert eine Webseite statt einer Datei. Bitte einen Direkt-Download-Link verwenden.";
+        }
+
         public static void GetFile(string url, string target)
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.UserAgent = Util.UA; req.Timeout = 60000; req.AllowAutoRedirect = true;
             using (var resp = (HttpWebResponse)req.GetResponse())
             {
-                if ((resp.ContentType ?? "").StartsWith("text/html")) throw new Exception("Link liefert eine Webseite statt einer Datei");
+                if ((resp.ContentType ?? "").StartsWith("text/html")) throw new DownloadBlockedException(HtmlProblem(resp));
                 using (var fs = File.Create(target)) resp.GetResponseStream().CopyTo(fs);
             }
         }
@@ -746,7 +773,7 @@ namespace VFALauncher
                     using (var resp = (HttpWebResponse)req.GetResponse())
                     {
                         if (resp.ContentType != null && resp.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase))
-                            throw new Exception("Der Link liefert eine Webseite statt einer Datei. Bitte einen Direkt-Download-Link verwenden.");
+                            throw new DownloadBlockedException(HtmlProblem(resp));
                         bool append = have > 0 && resp.StatusCode == HttpStatusCode.PartialContent;
                         if (!append) have = 0;
                         long total = resp.ContentLength > 0 ? resp.ContentLength + have : -1;
@@ -769,6 +796,7 @@ namespace VFALauncher
                     return;
                 }
                 catch (OperationCanceledException) { throw; }
+                catch (DownloadBlockedException) { throw; }
                 catch (Exception e)
                 {
                     Log("Download-Versuch " + attempt + " fehlgeschlagen: " + e.Message);
@@ -2811,7 +2839,7 @@ namespace VFALauncher
             int ch = ZbChoiceForm.Ask(this);
             if (ch == 0)
             { pr["zbOffer"] = "no"; try { Util.WriteJson(Path.Combine(Util.DataDir, "prefs.json"), pr); } catch { } return false; }
-            using (var f = new ZbForm((int)numRam.Value) { Auto = true, AutoVariant = ch == 1 ? 2 : 1 }) f.ShowDialog(this);
+            using (var f = new ZbForm((int)numRam.Value) { Auto = true, AutoVariant = ch == 3 ? 0 : (ch == 1 ? 2 : 1) }) f.ShowDialog(this);
             AppendLog("ZombieBuddy-Installation beendet - bitte 'Spielen' erneut klicken.");
             return true;
         }
@@ -2920,21 +2948,23 @@ namespace VFALauncher
     // Rueckfrage: ZombieBuddy erkannt -> neueste Version + einen der beiden Fixes
     class ZbChoiceForm : Form
     {
-        public int Choice;   // 0 = nein, 1 = Temporary Fix, 2 = [PATCH] ZombieBuddy
+        public int Choice;   // 0 = nein, 1 = Temporary Fix, 2 = [PATCH] ZombieBuddy, 3 = nur neueste Version (kein Fix)
         protected override void OnLoad(EventArgs e) { base.OnLoad(e); Loc.Apply(this); }
         public static int Ask(IWin32Window owner) { using (var f = new ZbChoiceForm()) { f.ShowDialog(owner); return f.Choice; } }
         ZbChoiceForm()
         {
-            Text = "ZombieBuddy"; Width = 650; Height = 250; StartPosition = FormStartPosition.CenterParent;
+            Text = "ZombieBuddy"; Width = 650; Height = 330; StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
-            Controls.Add(new Label { Text = "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? Es wird die neueste Version installiert, dazu einer der beiden Fixes:", AutoSize = true, Location = new Point(14, 14) });
-            var b1 = new Button { Text = "[B42] Temporary 42.21 Fix for ZombieBuddy\r\n(Workshop 3807686870)", Location = new Point(14, 70), Size = new Size(300, 66) };
-            var b2 = new Button { Text = "[PATCH] ZombieBuddy\r\n(Workshop 3809837933)", Location = new Point(324, 70), Size = new Size(300, 66) };
-            var b3 = new Button { Text = "Nein", Location = new Point(14, 156), Size = new Size(120, 34) };
+            Controls.Add(new Label { Text = "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? Waehle die Variante:", AutoSize = true, Location = new Point(14, 14) });
+            var b4 = new Button { Text = "Neueste Version von GitHub (ohne Fix)\r\n(ZombieBuddy v2.3.4 oder neuer)", Location = new Point(14, 66), Size = new Size(610, 56) };
+            var b1 = new Button { Text = "Neueste Version + Fix:\r\n[B42] Temporary 42.21 Fix for ZombieBuddy\r\n(Workshop 3807686870)", Location = new Point(14, 134), Size = new Size(300, 72) };
+            var b2 = new Button { Text = "Neueste Version + Fix:\r\n[PATCH] ZombieBuddy\r\n(Workshop 3809837933)", Location = new Point(324, 134), Size = new Size(300, 72) };
+            var b3 = new Button { Text = "Nein", Location = new Point(14, 226), Size = new Size(120, 34) };
+            b4.Click += (s, e) => { Choice = 3; Close(); };
             b1.Click += (s, e) => { Choice = 1; Close(); };
             b2.Click += (s, e) => { Choice = 2; Close(); };
             b3.Click += (s, e) => { Choice = 0; Close(); };
-            Controls.AddRange(new Control[] { b1, b2, b3 });
+            Controls.AddRange(new Control[] { b4, b1, b2, b3 });
         }
     }
 
@@ -2989,16 +3019,20 @@ namespace VFALauncher
                         if (r.ContainsKey("draft") && Equals(r["draft"], true)) continue;
                         var jar = Util.L2(r, "assets").FirstOrDefault(x => Util.S(x, "name").Equals("ZombieBuddy.jar", StringComparison.OrdinalIgnoreCase));
                         var dll = Util.L2(r, "assets").FirstOrDefault(x => Util.S(x, "name").Equals("zbNative.dll", StringComparison.OrdinalIgnoreCase));
-                        if (jar == null || dll == null) continue;
+                        if (jar == null) continue;
                         var tag = Util.S(r, "tag_name") + (Equals(r.ContainsKey("prerelease") ? r["prerelease"] : false, true) ? " (Vorabversion)" : "");
-                        tmp.Add(new KeyValuePair<string, string[]>(tag, new[] { Util.S(jar, "browser_download_url"), Util.S(dll, "browser_download_url") }));
+                        tmp.Add(new KeyValuePair<string, string[]>(tag, new[] { Util.S(jar, "browser_download_url"), dll != null ? Util.S(dll, "browser_download_url") : "", dll != null ? Util.S(r, "tag_name") : "" }));
                     }
+                    // Release ohne zbNative.dll (nur Jar): DLL der neuesten Version nehmen, die eine mitbringt
+                    string[] lastDll = null;
+                    foreach (var kv in tmp) if (kv.Value[1] != "") { lastDll = kv.Value; break; }
+                    foreach (var kv in tmp) if (kv.Value[1] == "" && lastDll != null) { kv.Value[1] = lastDll[1]; kv.Value[2] = lastDll[2]; }
                     BeginInvoke((Action)(() =>
                     {
                         rel.Clear(); cbVer.Items.Clear();
                         foreach (var kv in tmp) { rel[kv.Key] = kv.Value; cbVer.Items.Add(kv.Key); }
                         if (cbVer.Items.Count > 0) cbVer.SelectedIndex = 0;
-                        lblStat.Text = tmp.Count + " Version(en) mit Jar + DLL gefunden."; bLoad.Enabled = true; bInst.Enabled = true; AutoRun();
+                        lblStat.Text = tmp.Count + " Version(en) gefunden (ohne eigene DLL: DLL der aelteren Version)."; bLoad.Enabled = true; bInst.Enabled = true; AutoRun();
                     }));
                 }
                 catch (Exception ex) { BeginInvoke((Action)(() => { lblStat.Text = "GitHub nicht erreichbar: " + ex.Message; bLoad.Enabled = true; bInst.Enabled = cbVar.SelectedIndex != 0; AutoRun(); })); }
@@ -3073,7 +3107,7 @@ namespace VFALauncher
                         }
                         L("Temporary Fix gefunden: " + tj);
                         jar = tj; dll = Path.Combine(tmpDir, "zbNative.dll");
-                        if (firstRel != null) { L("Lade zbNative.dll (neueste Version) ..."); Downloader.GetFile(firstRel[1], dll); }
+                        if (firstRel != null && firstRel[1] != "") { L("Lade zbNative.dll (neueste Version) ..."); Downloader.GetFile(firstRel[1], dll); }
                         else { dll = FindZbDll(); if (dll == null) throw new Exception("GitHub nicht erreichbar und keine zbNative.dll gefunden."); }
                         what = "B42.21 Temporary Fix (Workshop " + TEMP_WID + ") + neueste DLL";
                     }
@@ -3094,7 +3128,7 @@ namespace VFALauncher
                     else
                     {
                         jar = Path.Combine(tmpDir, "ZombieBuddy.jar"); dll = Path.Combine(tmpDir, "zbNative.dll");
-                        L("Lade " + verKey + " ..."); Downloader.GetFile(urls[0], jar); Downloader.GetFile(urls[1], dll);
+                        L("Lade " + verKey + " ..."); Downloader.GetFile(urls[0], jar); if (urls.Length > 2 && urls[2] != "" && !verKey.StartsWith(urls[2])) L("zbNative.dll aus " + urls[2] + " (dieses Release bringt keine eigene DLL mit)"); Downloader.GetFile(urls[1], dll);
                         var jl = new FileInfo(jar).Length; var dl = new FileInfo(dll).Length;
                         if (jl < 100 * 1024 || dl < 1024 || dl > 5 * 1024 * 1024) throw new Exception("Unerwartete Dateigroessen (Jar " + jl + ", DLL " + dl + " Bytes) - abgebrochen.");
                         what = "Original " + verKey;
