@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.3.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.4.0")]
 
 namespace VFALauncher
 {
@@ -316,6 +316,17 @@ namespace VFALauncher
             "Installieren", "Install",
             "Schliessen", "Close",
             "Neu laden", "Reload",
+            "Auswahl zuruecksetzen", "Reset my choice",
+            "Deine ZombieBuddy-Auswahl wurde vergessen - beim naechsten Installieren/Spielen gilt wieder die Version aus dem Paket.", "Your ZombieBuddy choice was forgotten - the version from the package applies again on the next install/play.",
+            " (deine Auswahl) bleibt installiert - die Jar aus dem Paket wird nicht ueberschrieben.", " (your choice) stays installed - the jar from the package is not overwritten.",
+            " (deine Auswahl) wiederhergestellt.", " (your choice) restored.",
+            "Alt entfernt: ", "Old removed: ",
+            "Installierte ZombieBuddy.jar: Version ", "Installed ZombieBuddy.jar: version ",
+            "unbekannt", "unknown",
+            "WARNUNG: gewaehlt war ", "WARNING: selected was ",
+            ", installiert ist aber Version ", ", but the installed version is ",
+            " kann nicht geloescht werden (laeuft das Spiel noch?): ", " cannot be deleted (is the game still running?): ",
+            "WARNUNG - Auswahl konnte nicht gemerkt werden: ", "WARNING - choice could not be saved: ",
             "Google Drive: Download-Limit fuer diese Datei erreicht (Quota exceeded). Das Limit setzt sich meist nach ca. 24 Stunden zurueck - bitte spaeter erneut versuchen oder den Betreiber um einen anderen Download-Link bitten.", "Google Drive: the download limit for this file has been reached (quota exceeded). The limit usually resets after about 24 hours - please try again later or ask the operator for another download link.",
             "Google Drive verlangt eine Bestaetigung (Virenpruefung) und liefert keine Datei. Bitte den Betreiber um einen anderen Download-Link bitten.", "Google Drive requires a confirmation (virus scan) and does not deliver a file. Please ask the operator for another download link.",
             " Version(en) gefunden (ohne eigene DLL: DLL der aelteren Version).", " version(s) found (without their own DLL: DLL of the older version).",
@@ -992,9 +1003,47 @@ namespace VFALauncher
         }
 
         // ZombieBuddy: Jar + DLL ins Spielverzeichnis, ProjectZomboid64.json patchen, RAM setzen
+        // --- Vom Nutzer im Dialog gewaehlte ZombieBuddy-Version: wird gemerkt und von Paket/"Spielen" nicht mehr ueberschrieben
+        static string UserZbDir { get { return Path.Combine(Util.BaseDataDir, "zb_user"); } }
+        static string UserZbMarker { get { return Path.Combine(Util.BaseDataDir, "zb_user.json"); } }
+        public static Dictionary<string, object> UserZb() { return Util.ReadJson(UserZbMarker); }
+        public static void ClearUserZb() { try { if (File.Exists(UserZbMarker)) File.Delete(UserZbMarker); if (Directory.Exists(UserZbDir)) Directory.Delete(UserZbDir, true); } catch { } }
+
+        // Implementation-Version aus META-INF/MANIFEST.MF der Jar
+        public static string JarVersion(string jar)
+        {
+            try
+            {
+                using (var z = System.IO.Compression.ZipFile.OpenRead(jar))
+                {
+                    var e = z.GetEntry("META-INF/MANIFEST.MF"); if (e == null) return "";
+                    using (var sr = new StreamReader(e.Open()))
+                    { var m = Regex.Match(sr.ReadToEnd(), @"Implementation-Version:\s*(\S+)"); return m.Success ? m.Groups[1].Value : ""; }
+                }
+            }
+            catch { return ""; }
+        }
+
         public void SetupZombieBuddy(string pzDir, int ramGb)
         {
             if (pzDir == null || !Directory.Exists(pzDir)) throw new Exception("Project-Zomboid-Installation nicht gefunden.");
+            var uz = UserZb();
+            if (Util.S(uz, "jarSha") != "")
+            {   // deine Auswahl aus "ZombieBuddy installieren" gilt - die Jar aus dem Paket (z.B. ZombieBuddyFix 2.3.2) wird NICHT darueber kopiert
+                var gj = Path.Combine(pzDir, "ZombieBuddy.jar");
+                var sj = Path.Combine(UserZbDir, "ZombieBuddy.jar");
+                if ((!File.Exists(gj) || Util.Sha256File(gj) != Util.S(uz, "jarSha")) && File.Exists(sj))
+                {
+                    File.Copy(sj, gj, true);
+                    if (File.Exists(Path.Combine(UserZbDir, "zbNative.dll"))) File.Copy(Path.Combine(UserZbDir, "zbNative.dll"), Path.Combine(pzDir, "zbNative.dll"), true);
+                    if (File.Exists(sj + ".zbs")) File.Copy(sj + ".zbs", gj + ".zbs", true);
+                    Log("ZombieBuddy " + Util.S(uz, "version") + " (deine Auswahl) wiederhergestellt.");
+                }
+                else Log("ZombieBuddy " + Util.S(uz, "version") + " (deine Auswahl) bleibt installiert - die Jar aus dem Paket wird nicht ueberschrieben.");
+                var nj = Path.Combine(pzDir, "ZombieBuddy.jar.new"); if (File.Exists(nj)) File.Delete(nj);
+                PatchLauncherJson(pzDir, ramGb);
+                return;
+            }
             var modsDir = Path.Combine(Util.ZomboidDir, "mods");
             string jar = null;
             foreach (var cand in new[] { "ZombieBuddyFix", "ZombieBuddy" })
@@ -1022,17 +1071,38 @@ namespace VFALauncher
         }
 
         // Nur-ZombieBuddy-Installation (Dialog "ZombieBuddy installieren"): gewaehlte Jar + DLL ins Spielverzeichnis, JSON patchen
-        public void InstallZbFiles(string pzDir, string jar, string dll, int ramGb)
+        public void InstallZbFiles(string pzDir, string jar, string dll, int ramGb, string zbs = null)
         {
             if (pzDir == null || !Directory.Exists(pzDir)) throw new Exception("Project-Zomboid-Installation nicht gefunden.");
+            // 1) alte Version komplett entfernen (Jar, Update-Datei .new, alte Signatur .zbs, DLL)
+            foreach (var f in new[] { "ZombieBuddy.jar", "ZombieBuddy.jar.new", "ZombieBuddy.jar.zbs", "zbNative.dll" })
+            {
+                var old = Path.Combine(pzDir, f);
+                if (!File.Exists(old)) continue;
+                try { File.Delete(old); Log("Alt entfernt: " + f); }
+                catch (Exception ex) { throw new Exception(f + " kann nicht geloescht werden (laeuft das Spiel noch?): " + ex.Message); }
+            }
+            // 2) neue Dateien kopieren und pruefen
             foreach (var pair in new[] { new[] { jar, "ZombieBuddy.jar" }, new[] { dll, "zbNative.dll" } })
             {
                 var dst = Path.Combine(pzDir, pair[1]);
                 File.Copy(pair[0], dst, true);
+                if (Util.Sha256File(dst) != Util.Sha256File(pair[0])) throw new Exception(pair[1] + ": Kopie stimmt nicht mit der Quelle ueberein.");
                 Log(pair[1] + " (" + new FileInfo(dst).Length + " Bytes, SHA256 " + Util.Sha256File(dst).Substring(0, 12) + "...) -> " + pzDir);
             }
-            var newJar = Path.Combine(pzDir, "ZombieBuddy.jar.new");
-            if (File.Exists(newJar)) File.Delete(newJar);
+            if (zbs != null && File.Exists(zbs)) File.Copy(zbs, Path.Combine(pzDir, "ZombieBuddy.jar.zbs"), true);
+            var ver = JarVersion(Path.Combine(pzDir, "ZombieBuddy.jar"));
+            Log("Installierte ZombieBuddy.jar: Version " + (ver == "" ? "unbekannt" : ver));
+            // 3) Auswahl merken (Kopie zum Wiederherstellen), damit "Spielen"/Paket sie nicht ueberschreibt
+            try
+            {
+                ClearUserZb(); Directory.CreateDirectory(UserZbDir);
+                File.Copy(Path.Combine(pzDir, "ZombieBuddy.jar"), Path.Combine(UserZbDir, "ZombieBuddy.jar"), true);
+                File.Copy(Path.Combine(pzDir, "zbNative.dll"), Path.Combine(UserZbDir, "zbNative.dll"), true);
+                if (File.Exists(Path.Combine(pzDir, "ZombieBuddy.jar.zbs"))) File.Copy(Path.Combine(pzDir, "ZombieBuddy.jar.zbs"), Path.Combine(UserZbDir, "ZombieBuddy.jar.zbs"), true);
+                Util.WriteJson(UserZbMarker, new Dictionary<string, object> { { "version", ver }, { "jarSha", Util.Sha256File(Path.Combine(pzDir, "ZombieBuddy.jar")) }, { "time", DateTime.Now.ToString("s") } });
+            }
+            catch (Exception ex) { Log("WARNUNG - Auswahl konnte nicht gemerkt werden: " + ex.Message); }
             if (!PatchLauncherJson(pzDir, ramGb)) Log("ProjectZomboid64.json war schon passend.");
         }
 
@@ -2995,7 +3065,9 @@ namespace VFALauncher
             bInst = new Button { Text = "Installieren", Location = new Point(14, 164), Width = 200, Height = 34, Enabled = false };
             lblStat = new Label { Text = "Lade Versionen ...", AutoSize = true, Location = new Point(226, 172) };
             log = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Location = new Point(14, 210), Width = 716, Height = 340 };
-            Controls.AddRange(new Control[] { cbVer, bLoad, cbVar, numRam, bInst, lblStat, log });
+            var bReset = new Button { Text = "Auswahl zuruecksetzen", Location = new Point(494, 36), Width = 236 };
+            bReset.Click += (s, e) => { Installer.ClearUserZb(); log.AppendText("Deine ZombieBuddy-Auswahl wurde vergessen - beim naechsten Installieren/Spielen gilt wieder die Version aus dem Paket.\r\n"); };
+            Controls.AddRange(new Control[] { cbVer, bLoad, bReset, cbVar, numRam, bInst, lblStat, log });
             cbVar.SelectedIndexChanged += (s, e) => { cbVer.Enabled = cbVar.SelectedIndex == 0; bInst.Enabled = cbVar.SelectedIndex != 0 || cbVer.Items.Count > 0; };
             bLoad.Click += (s, e) => LoadReleases();
             bInst.Click += (s, e) => DoInstall();
@@ -3019,9 +3091,10 @@ namespace VFALauncher
                         if (r.ContainsKey("draft") && Equals(r["draft"], true)) continue;
                         var jar = Util.L2(r, "assets").FirstOrDefault(x => Util.S(x, "name").Equals("ZombieBuddy.jar", StringComparison.OrdinalIgnoreCase));
                         var dll = Util.L2(r, "assets").FirstOrDefault(x => Util.S(x, "name").Equals("zbNative.dll", StringComparison.OrdinalIgnoreCase));
+                        var zbsA = Util.L2(r, "assets").FirstOrDefault(x => Util.S(x, "name").Equals("ZombieBuddy.jar.zbs", StringComparison.OrdinalIgnoreCase));
                         if (jar == null) continue;
                         var tag = Util.S(r, "tag_name") + (Equals(r.ContainsKey("prerelease") ? r["prerelease"] : false, true) ? " (Vorabversion)" : "");
-                        tmp.Add(new KeyValuePair<string, string[]>(tag, new[] { Util.S(jar, "browser_download_url"), dll != null ? Util.S(dll, "browser_download_url") : "", dll != null ? Util.S(r, "tag_name") : "" }));
+                        tmp.Add(new KeyValuePair<string, string[]>(tag, new[] { Util.S(jar, "browser_download_url"), dll != null ? Util.S(dll, "browser_download_url") : "", dll != null ? Util.S(r, "tag_name") : "", zbsA != null ? Util.S(zbsA, "browser_download_url") : "" }));
                     }
                     // Release ohne zbNative.dll (nur Jar): DLL der neuesten Version nehmen, die eine mitbringt
                     string[] lastDll = null;
@@ -3096,7 +3169,7 @@ namespace VFALauncher
                     if (pz == null) throw new Exception("Project Zomboid wurde nicht gefunden. Ist es ueber Steam installiert?");
                     L("Project Zomboid: " + pz);
                     var tmpDir = Path.Combine(Util.DataDir, "zb_install"); Directory.CreateDirectory(tmpDir);
-                    string jar, dll, what;
+                    string jar, dll, what, zbsPath = null;
                     if (useTemp)
                     {
                         var tj = FindTempFixJar();
@@ -3131,9 +3204,13 @@ namespace VFALauncher
                         L("Lade " + verKey + " ..."); Downloader.GetFile(urls[0], jar); if (urls.Length > 2 && urls[2] != "" && !verKey.StartsWith(urls[2])) L("zbNative.dll aus " + urls[2] + " (dieses Release bringt keine eigene DLL mit)"); Downloader.GetFile(urls[1], dll);
                         var jl = new FileInfo(jar).Length; var dl = new FileInfo(dll).Length;
                         if (jl < 100 * 1024 || dl < 1024 || dl > 5 * 1024 * 1024) throw new Exception("Unerwartete Dateigroessen (Jar " + jl + ", DLL " + dl + " Bytes) - abgebrochen.");
+                        if (urls.Length > 3 && urls[3] != "") { zbsPath = Path.Combine(tmpDir, "ZombieBuddy.jar.zbs"); try { Downloader.GetFile(urls[3], zbsPath); } catch { zbsPath = null; } }
                         what = "Original " + verKey;
                     }
-                    new Installer { Log = L }.InstallZbFiles(pz, jar, dll, ram);
+                    if (zbsPath == null && File.Exists(jar + ".zbs")) zbsPath = jar + ".zbs";
+                    new Installer { Log = L }.InstallZbFiles(pz, jar, dll, ram, zbsPath);
+                    var iv = Installer.JarVersion(Path.Combine(pz, "ZombieBuddy.jar"));
+                    if (!useFix && !useTemp && iv != "" && verKey != null && !verKey.TrimStart('v', 'V').StartsWith(iv)) L("WARNUNG: gewaehlt war " + verKey + ", installiert ist aber Version " + iv + ".");
                     L("");
                     L("=== FERTIG: ZombieBuddy (" + what + ") ist installiert ===");
                     L("ProjectZomboid64.json wurde mit -agentlib:zbNative gepatcht (Sicherung: ProjectZomboid64.json.vfa-backup). Damit startet der normale Steam-Start (Play) schon mit ZombieBuddy.");
