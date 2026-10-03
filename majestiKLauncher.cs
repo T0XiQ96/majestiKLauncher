@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.4.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.5.0")]
 
 namespace VFALauncher
 {
@@ -1165,14 +1165,14 @@ namespace VFALauncher
             if (ramGb > 0)
             {
                 args.RemoveAll(a => a.StartsWith("-Xmx"));
-                args.Insert(1, "-Xmx" + ramGb + "g");
+                args.Insert(1, "-Xmx" + (ramGb * 1000) + "m");   // 12 GB -> -Xmx12000m
             }
             if (string.Join("|", args) == before) return false;
             var bak = path + ".vfa-backup";
             if (!File.Exists(bak)) File.Copy(path, bak);
             cfg["vmArgs"] = args;
             Util.WriteJson(path, cfg);
-            Log("ProjectZomboid64.json angepasst (-agentlib:zbNative" + (ramGb > 0 ? ", -Xmx" + ramGb + "g" : "") + ").");
+            Log("ProjectZomboid64.json angepasst (-agentlib:zbNative" + (ramGb > 0 ? ", -Xmx" + (ramGb * 1000) + "m" : "") + ").");
             return true;
         }
 
@@ -1803,7 +1803,7 @@ namespace VFALauncher
             chkConfig = new CheckBox { Text = "Mod-Einstellungen des Kurators uebernehmen (Backup wird angelegt)", Checked = true, AutoSize = true, Location = new Point(20, 140) };
             chkKeepZip = new CheckBox { Text = "Download-ZIP nach der Installation behalten", Checked = false, AutoSize = true, Location = new Point(20, 166) };
             var lblRam = new Label { Text = "RAM fuer das Spiel (GB, 0 = nicht aendern):", AutoSize = true, Location = new Point(480, 142) };
-            numRam = new NumericUpDown { Minimum = 0, Maximum = 64, Value = Math.Max(0, Math.Min(64, int.Parse(Util.S(LoadPrefs(), "ramGb", "12")))), Location = new Point(760, 138), Width = 60 };
+            numRam = new NumericUpDown { Minimum = 0, Maximum = 64, Value = Math.Max(0, Math.Min(64, int.Parse(Util.S(LoadPrefs(), "ramGb", "0")))), Location = new Point(760, 138), Width = 60 };
 
 
             var btnZb = new Button { Text = "Nur ZombieBuddy installieren ...", Location = new Point(20, 200), Width = 240, Height = 34 };
