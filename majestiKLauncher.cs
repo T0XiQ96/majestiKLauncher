@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.5.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.6.0")]
 
 namespace VFALauncher
 {
@@ -316,6 +316,10 @@ namespace VFALauncher
             "Installieren", "Install",
             "Schliessen", "Close",
             "Neu laden", "Reload",
+            "Achtung: nur ", "Warning: only ",
+            " MB RAM - unter 8 GB ist zu wenig fuer viele Mods!", " MB RAM - below 8 GB is too little for many mods!",
+            "Warnung: Nur ", "Warning: only ",
+            " MB RAM fuer das Spiel eingestellt (unter 8 GB).\r\nMit vielen Mods kann das zu Rucklern und Abstuerzen fuehren. Empfohlen: mindestens 8 GB (Feld RAM, z.B. 12 eingeben).\r\n\r\nTrotzdem starten?", " MB RAM set for the game (below 8 GB).\r\nWith many mods this can cause stutter and crashes. Recommended: at least 8 GB (RAM field, e.g. enter 12).\r\n\r\nStart anyway?",
             "Auswahl zuruecksetzen", "Reset my choice",
             "Deine ZombieBuddy-Auswahl wurde vergessen - beim naechsten Installieren/Spielen gilt wieder die Version aus dem Paket.", "Your ZombieBuddy choice was forgotten - the version from the package applies again on the next install/play.",
             " (deine Auswahl) bleibt installiert - die Jar aus dem Paket wird nicht ueberschrieben.", " (your choice) stays installed - the jar from the package is not overwritten.",
@@ -1646,7 +1650,7 @@ namespace VFALauncher
         readonly bool devMode;
 
         TextBox log; ProgressBar bar; Label status, lblVersion, lblServer; Button btnInstall, btnPlay, btnCancel, btnManual, btnDelSrv; PictureBox headerPic; Image defaultLogo; LinkLabel lblUpdate, lblCredit; TextBox tLauncherWs; ComboBox cbServer; List<ServerEntry> servers; ServerEntry curServer; bool switching; static readonly ServerEntry NoServer = new ServerEntry { Name = "", Url = "", Slug = "_leer" };
-        CheckBox chkConfig, chkKeepZip; NumericUpDown numRam;
+        CheckBox chkConfig, chkKeepZip; NumericUpDown numRam; Label lblRamWarn;
         CancellationTokenSource cts;
         Color accent = Color.FromArgb(178, 34, 34);
         static readonly Color BgDark = Color.FromArgb(22, 22, 26), BgPanel = Color.FromArgb(32, 32, 38), BgInput = Color.FromArgb(14, 14, 17),
@@ -1721,7 +1725,7 @@ namespace VFALauncher
             ApplyLogo();
             Shown += (s, e) =>
             {
-                ApplyDevFields(); RefreshManifest(); CheckLauncherUpdate(); if (!devMode) SyncServerList();
+                ApplyDevFields(); RefreshManifest(); CheckLauncherUpdate(); if (!devMode) SyncServerList(); UpdateRamWarn();
                 ThreadPool.QueueUserWorkItem(_ => { try { if (!ZbInstalled() && ZbDetected()) BeginInvoke((Action)(() => OfferZombieBuddy())); } catch { } });
                 updTimer = new System.Windows.Forms.Timer { Interval = 30 * 60 * 1000 };   // Update-Pruefung auch bei laenger offenem Launcher
                 updTimer.Tick += (s2, e2) => { if (!lblUpdate.Visible) CheckLauncherUpdate(); };
@@ -1810,6 +1814,9 @@ namespace VFALauncher
             btnZb.Click += (s, e) => { using (var f = new ZbForm((int)numRam.Value)) f.ShowDialog(this); };
             p.Controls.AddRange(new Control[] { lblVersion, lblServer, btnCopy, btnInstall, btnPlay, btnCancel, btnManual, chkConfig, chkKeepZip, lblRam, numRam, btnZb });
             foreach (Control c in p.Controls) c.Top += 46;   // Platz fuer die Server-Leiste oben
+            lblRamWarn = new Label { Text = "", AutoSize = true, ForeColor = Color.OrangeRed, Location = new Point(480, 214), Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
+            p.Controls.Add(lblRamWarn);
+            numRam.ValueChanged += (s, e) => UpdateRamWarn();
 
             var lblSrv = new Label { Text = "Server:", AutoSize = true, Location = new Point(20, 16), Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             cbServer = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(86, 12), Width = 380 };
@@ -2919,6 +2926,10 @@ namespace VFALauncher
             try
             {
                 if (OfferZombieBuddy()) return;
+                {
+                    int ramMb = RamEffectiveMb();
+                    if (ramMb > 0 && ramMb < MIN_RAM_MB && Loc.Show(this, "Warnung: Nur " + ramMb + " MB RAM fuer das Spiel eingestellt (unter 8 GB).\r\nMit vielen Mods kann das zu Rucklern und Abstuerzen fuehren. Empfohlen: mindestens 8 GB (Feld RAM, z.B. 12 eingeben).\r\n\r\nTrotzdem starten?", "RAM", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                }
                 if (curServer != null && curServer.IsCollection)
                 {
                     Process.Start("steam://rungameid/108600");
@@ -2952,6 +2963,39 @@ namespace VFALauncher
 
         // ---------- Prefs / UI-Helfer
         Dictionary<string, object> LoadPrefs() { return Util.ReadJson(Path.Combine(Util.DataDir, "prefs.json")); }
+        // ---------- RAM-Warnung (unter 8 GB)
+        const int MIN_RAM_MB = 8000;
+        static int XmxMb(string pz)   // aktuelles -Xmx aus ProjectZomboid64.json in MB, -1 = unbekannt
+        {
+            try
+            {
+                if (pz == null) return -1;
+                foreach (var a in Util.L(Util.ReadJson(Path.Combine(pz, "ProjectZomboid64.json")), "vmArgs"))
+                {
+                    var m = Regex.Match(a, @"^-Xmx(\d+)([kKmMgG]?)$");
+                    if (!m.Success) continue;
+                    long v = long.Parse(m.Groups[1].Value); var u = m.Groups[2].Value.ToLowerInvariant();
+                    return (int)(u == "g" ? v * 1024 : u == "k" ? v / 1024 : v);
+                }
+            }
+            catch { }
+            return -1;
+        }
+
+        // Wirksamer Arbeitsspeicher: Feld > 0 -> N*1000 MB, sonst das, was schon im Spiel steht
+        int RamEffectiveMb()
+        {
+            int f = (int)numRam.Value;
+            return f > 0 ? f * 1000 : XmxMb(SteamInfo.PZInstallDir());
+        }
+
+        void UpdateRamWarn()
+        {
+            if (lblRamWarn == null) return;
+            int mb = RamEffectiveMb();
+            lblRamWarn.Text = (mb > 0 && mb < MIN_RAM_MB) ? "Achtung: nur " + mb + " MB RAM - unter 8 GB ist zu wenig fuer viele Mods!" : "";
+        }
+
         void SavePrefs()
         {
             var p = LoadPrefs(); p["ramGb"] = (int)numRam.Value;
