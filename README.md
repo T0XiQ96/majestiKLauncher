@@ -32,7 +32,7 @@ Unzip into its own folder (e.g. `C:\majestiKLauncher`) and start `majestiKLaunch
 4. Click **Play** – the game starts via Steam and the server address is copied to the clipboard (in-game: Join → paste).
 5. Later: when a new package exists you see **"Update needed"** – install again. Done.
 
-Other features: **Install ZombieBuddy only** (choose version, original or compatibility fix), **custom logo per server**, **Deutsch / English** switch (top right).
+Other features: **ZombieBuddy prompt** (if ZombieBuddy / Java mods are detected but not set up, the launcher offers the latest version + B42 fix), **Install ZombieBuddy only** (choose version, original or compatibility fix), **custom logo per server**, **Deutsch / English** switch (top right).
 
 **What the launcher changes:** only `%UserProfile%\Zomboid\mods` (incl. `default.txt`), `ProjectZomboid64.json` (with backup) and – for ZombieBuddy – `ZombieBuddy.jar` / `zbNative.dll` in the game folder.
 
@@ -44,7 +44,8 @@ Start **`Launcher DEV.bat`** (included in the download; or the exe with `--dev`)
 - pack it as a ZIP with checksum,
 - create the manifest (version, download link, server address, logo),
 - update the server INI (`Mods=`, `Map=`),
-- manage the servers your players see (add / remove / logos) and export `servers.json`.
+- manage the servers your players see (add / remove / logos),
+- **create a ready-to-share player package (ZIP)** with one button: exe, `launcher.cfg`, `servers.json`, logos and manifests. Players unzip, start, install.
 
 Full step-by-step tutorial (including how to assemble the player package): [DEV_TUTORIAL_EN.txt](DEV_TUTORIAL_EN.txt) · [DEV_TUTORIAL_DE.txt](DEV_TUTORIAL_DE.txt)
 
@@ -113,7 +114,7 @@ In einen eigenen Ordner entpacken (z. B. `C:\majestiKLauncher`) und `majestiKLau
 4. **Spielen** klicken – das Spiel startet über Steam, die Server-Adresse liegt in der Zwischenablage (im Spiel: Join → einfügen).
 5. Später: gibt es ein neues Paket, siehst du **„Aktualisieren nötig"** – einfach erneut installieren. Fertig.
 
-Weitere Funktionen: **Nur ZombieBuddy installieren** (Version wählen, Original oder Compatibility-Fix), **eigenes Logo pro Server**, Umschalter **Deutsch / English** (oben rechts).
+Weitere Funktionen: **ZombieBuddy-Rückfrage** (erkennt der Launcher ZombieBuddy / Java-Mods ohne Einrichtung, bietet er die neueste Version + B42-Fix an), **Nur ZombieBuddy installieren** (Version wählen, Original oder Compatibility-Fix), **eigenes Logo pro Server**, Umschalter **Deutsch / English** (oben rechts).
 
 **Was der Launcher ändert:** nur `%UserProfile%\Zomboid\mods` (inkl. `default.txt`), `ProjectZomboid64.json` (mit Backup) und – bei ZombieBuddy – `ZombieBuddy.jar` / `zbNative.dll` im Spielordner.
 
@@ -125,7 +126,8 @@ Weitere Funktionen: **Nur ZombieBuddy installieren** (Version wählen, Original 
 - es als ZIP mit Prüfsumme packen,
 - das Manifest erzeugen (Version, Download-Link, Server-Adresse, Logo),
 - die Server-INI aktualisieren (`Mods=`, `Map=`),
-- die Server verwalten, die deine Spieler sehen (hinzufügen / entfernen / Logos), und die `servers.json` exportieren.
+- die Server verwalten, die deine Spieler sehen (hinzufügen / entfernen / Logos),
+- per Knopf ein **fertiges Spieler-Paket (ZIP)** erstellen: exe, `launcher.cfg`, `servers.json`, Logos und Manifeste. Spieler entpacken, starten, installieren.
 
 Komplettes Schritt-für-Schritt-Tutorial (inkl. Zusammenstellen des Spieler-Pakets): [DEV_TUTORIAL_DE.txt](DEV_TUTORIAL_DE.txt) · [DEV_TUTORIAL_EN.txt](DEV_TUTORIAL_EN.txt)
 

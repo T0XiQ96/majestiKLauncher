@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.1.0")]
 
 namespace VFALauncher
 {
@@ -316,6 +316,9 @@ namespace VFALauncher
             "Installieren", "Install",
             "Schliessen", "Close",
             "Neu laden", "Reload",
+            "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? (neueste Version + B42-Fix)", "ZombieBuddy (Java mods) was detected but is not set up.\r\nInstall it now? (latest version + B42 fix)",
+            "ZombieBuddy-Installation beendet - bitte 'Spielen' erneut klicken.", "ZombieBuddy installation finished - please click 'Play' again.",
+            "Workshop-Seite des Fixes wird in Steam geoeffnet - bitte abonnieren, danach hier erneut 'Installieren' klicken.", "Opening the fix's Workshop page in Steam - please subscribe, then click 'Install' here again.",
         };
 
         static void Build()
@@ -1606,6 +1609,7 @@ namespace VFALauncher
             Shown += (s, e) =>
             {
                 ApplyDevFields(); RefreshManifest(); CheckLauncherUpdate(); if (!devMode) SyncServerList();
+                ThreadPool.QueueUserWorkItem(_ => { try { if (!ZbInstalled() && ZbDetected()) BeginInvoke((Action)(() => OfferZombieBuddy())); } catch { } });
                 updTimer = new System.Windows.Forms.Timer { Interval = 30 * 60 * 1000 };   // Update-Pruefung auch bei laenger offenem Launcher
                 updTimer.Tick += (s2, e2) => { if (!lblUpdate.Visible) CheckLauncherUpdate(); };
                 updTimer.Start();
@@ -1800,7 +1804,9 @@ namespace VFALauncher
             var b9 = new Button { Text = "Mod-Liste / Workshop-Auswahl ...", Location = new Point(530, y), Width = 260 };
             b9.Click += (s, e) => DevModList(); p.Controls.Add(b9); y += 34;
             var b10 = new Button { Text = "Serverliste fuer Spieler speichern (servers.json) ...", Location = new Point(200, y), Width = 320 };
-            b10.Click += (s, e) => DevExportServers(); p.Controls.Add(b10); y += 34;
+            b10.Click += (s, e) => DevExportServers(); p.Controls.Add(b10);
+            var b11 = new Button { Text = "Spieler-Paket erstellen (ZIP) ...", Location = new Point(530, y), Width = 260 };
+            b11.Click += (s, e) => DevBuildPlayerPack(); p.Controls.Add(b11); y += 34;
             lblWs = new Label { Location = new Point(200, y), AutoSize = true }; p.Controls.Add(lblWs); y += 30;
 
             p.Controls.Add(new Label { Text = "5) ZombieBuddy - zbNative.dll (wird ueber das Manifest an alle verteilt)", Font = new Font(Font, FontStyle.Bold), Location = new Point(10, y), AutoSize = true }); y += 26;
@@ -2292,7 +2298,8 @@ namespace VFALauncher
                 var dir = Path.Combine(Util.BaseDataDir, "logos"); Directory.CreateDirectory(dir);
                 var f = Path.Combine(dir, "list_" + Util.Sha256String(key).Substring(0, 12) + ".img");
                 var tmp = f + ".tmp"; if (File.Exists(tmp)) File.Delete(tmp);
-                Downloader.GetFile(logoUrl, tmp);
+                if (logoUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)) Downloader.GetFile(logoUrl, tmp);
+                else File.Copy(Path.IsPathRooted(logoUrl) ? logoUrl : Path.Combine(Util.ExeDir, logoUrl), tmp, true);   // mitgelieferte Datei neben der exe
                 var len = new FileInfo(tmp).Length;
                 if (len < 100 || len > 8 * 1024 * 1024) { File.Delete(tmp); return ""; }
                 using (LoadImageNoLock(tmp)) { }
@@ -2305,12 +2312,15 @@ namespace VFALauncher
 
         void SyncServerList()
         {
-            var src = Util.S(cfg, "serverListUrl"); if (src == "") src = DEFAULT_SERVERLIST_URL;
+            var src = Util.S(cfg, "serverListUrl");
+            var localList = Path.Combine(Util.ExeDir, "servers.json");
+            bool useLocal = src == "" && File.Exists(localList);   // servers.json liegt neben der exe -> diese Liste gilt (ohne Internet)
+            if (src == "") src = DEFAULT_SERVERLIST_URL;
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
                 {
-                    var txt = Downloader.GetString(src + (src.Contains("?") ? "&" : "?") + "nocache=" + DateTime.UtcNow.Ticks);
+                    var txt = useLocal ? File.ReadAllText(localList, Encoding.UTF8) : Downloader.GetString(src + (src.Contains("?") ? "&" : "?") + "nocache=" + DateTime.UtcNow.Ticks);
                     var items = new List<ServerEntry>(); var logos = new Dictionary<string, string>();
                     foreach (var d in Util.L2(Util.Json.Deserialize<Dictionary<string, object>>(txt), "servers"))
                     {
@@ -2360,17 +2370,76 @@ namespace VFALauncher
 
         void DevExportServers()
         {
+            ExportServersTo(Util.ExeDir);
+            SetStatus("Gespeichert: " + Path.Combine(Util.ExeDir, "servers.json"));
+            AppendLog("servers.json gespeichert (Logos: Ordner 'logos' daneben). Fuer die Spieler am besten: 'Spieler-Paket erstellen (ZIP)'.");
+        }
+
+        // servers.json (+ Ordner logos) in 'dir' schreiben
+        void ExportServersTo(string dir)
+        {
             var list = new List<object>();
             foreach (var e in servers)
             {
                 var d = new Dictionary<string, object> { { "name", e.Name }, { "url", e.Url } };
                 if (e.LogoUrl != "") d["logoUrl"] = e.LogoUrl;
+                else if (e.Logo != "" && File.Exists(e.Logo) && e.Logo.IndexOf("list_", StringComparison.Ordinal) < 0)
+                {   // selbst gesetztes Logo: nach logos\ kopieren, damit es mit dem Paket an die Spieler geht
+                    var ld = Path.Combine(dir, "logos"); Directory.CreateDirectory(ld);
+                    var fn = e.Slug + Path.GetExtension(e.Logo).ToLowerInvariant(); if (fn.StartsWith(".")) fn = "server" + fn;
+                    File.Copy(e.Logo, Path.Combine(ld, fn), true);
+                    d["logoUrl"] = "logos\\" + fn;
+                }
                 list.Add(d);
             }
-            var path = Path.Combine(Util.ExeDir, "servers.json");
-            Util.WriteJson(path, new Dictionary<string, object> { { "servers", list } });
-            SetStatus("Gespeichert: " + path);
-            AppendLog("servers.json gespeichert: " + path + "  -> in GitHub (Repo-Hauptordner) hochladen, dann sehen alle Spieler diese Serverliste.");
+            Util.WriteJson(Path.Combine(dir, "servers.json"), new Dictionary<string, object> { { "servers", list } });
+        }
+
+        // Fertiges Spieler-Paket: exe + launcher.cfg + servers.json + logos + Manifeste + Info-Texte -> ZIP
+        void DevBuildPlayerPack()
+        {
+            using (var sf = new SaveFileDialog { Filter = "ZIP (*.zip)|*.zip", FileName = "majestiK_Spielerpaket.zip", Title = "Spieler-Paket speichern" })
+            {
+                if (sf.ShowDialog(this) != DialogResult.OK) return;
+                string stage = null;
+                try
+                {
+                    stage = Path.Combine(Path.GetTempPath(), "majestiK_pack_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                    var root = Path.Combine(stage, "majestiKLauncher"); Directory.CreateDirectory(root);
+                    File.Copy(Application.ExecutablePath, Path.Combine(root, "majestiKLauncher.exe"), true);
+                    if (File.Exists(Application.ExecutablePath + ".config")) File.Copy(Application.ExecutablePath + ".config", Path.Combine(root, "majestiKLauncher.exe.config"), true);
+                    foreach (var f in new[] { "launcher_info.txt", "launcher_info_en.txt", "logo.png" })
+                    { var s = Path.Combine(Util.ExeDir, f); if (File.Exists(s)) File.Copy(s, Path.Combine(root, f), true); }
+                    ExportServersTo(root);
+                    var first = servers.FirstOrDefault(x => !x.IsCollection) ?? servers.FirstOrDefault();
+                    var c = new Dictionary<string, object> { { "title", first != null ? first.Name : "" }, { "manifestUrl", first != null ? first.Url : "" } };
+                    var ws = LauncherWsUrl; if (ws != "") c["launcherWorkshopUrl"] = ws;
+                    foreach (var k in new[] { "serverListUrl", "launcherUpdateUrl" }) { var v = Util.S(cfg, k); if (v != "") c[k] = v; }
+                    Util.WriteJson(Path.Combine(root, "launcher.cfg"), c);
+                    int mc = 0;
+                    foreach (var sv in servers)
+                    {
+                        if (sv.IsCollection || !sv.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) continue;
+                        string txt = null;
+                        if (sv == curServer) txt = Util.Pretty(Util.Json.Serialize(DevManifest()));
+                        else
+                        {
+                            var mp = sv.Slug == "" ? Path.Combine(Util.ExeDir, "manifest.json") : Path.Combine(Util.ExeDir, "dev", sv.Slug, "manifest.json");
+                            if (File.Exists(mp)) txt = File.ReadAllText(mp, Encoding.UTF8);
+                        }
+                        if (txt == null) { AppendLog("Hinweis: kein gespeichertes Manifest fuer '" + sv.Name + "' (Server auswaehlen, 'manifest.json speichern') - Spieler brauchen dann den Online-Link."); continue; }
+                        Directory.CreateDirectory(Path.Combine(root, "manifests"));
+                        File.WriteAllText(BundledManifestPath(sv.Url).Replace(Util.ExeDir, root + Path.DirectorySeparatorChar), txt, new UTF8Encoding(false)); mc++;
+                    }
+                    if (File.Exists(sf.FileName)) File.Delete(sf.FileName);
+                    System.IO.Compression.ZipFile.CreateFromDirectory(root, sf.FileName, System.IO.Compression.CompressionLevel.Optimal, true);
+                    AppendLog("Spieler-Paket erstellt: " + sf.FileName + "  (" + servers.Count + " Server, " + mc + " Manifest(e) enthalten)");
+                    AppendLog("Achtung: Manifeste enthalten ggf. das Server-Passwort. Dieses ZIP an deine Spieler geben - Entpacken, majestiKLauncher.exe starten, Installieren.");
+                    SetStatus("Spieler-Paket erstellt: " + sf.FileName);
+                }
+                catch (Exception ex) { AppendLog("FEHLER: " + ex.Message); }
+                finally { try { if (stage != null) Directory.Delete(stage, true); } catch { } }
+            }
         }
 
         void RemoveServer()
@@ -2485,6 +2554,17 @@ namespace VFALauncher
         }
 
         // ---------- Manifest
+        static string BundledManifestPath(string url) { return Path.Combine(Util.ExeDir, "manifests", Util.Sha256String(url).Substring(0, 12) + ".json"); }
+
+        // Online-Manifest; ist es nicht erreichbar, gilt das mitgelieferte (manifests\<hash>.json). Kein http-Link = Datei (relativ zur exe).
+        static string LoadManifestText(string url)
+        {
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                return File.ReadAllText(Path.IsPathRooted(url) ? url : Path.Combine(Util.ExeDir, url), Encoding.UTF8);
+            try { return Downloader.GetString(url + (url.Contains("?") ? "&" : "?") + "nocache=" + DateTime.UtcNow.Ticks); }
+            catch { var b = BundledManifestPath(url); if (File.Exists(b)) return File.ReadAllText(b, Encoding.UTF8); throw; }
+        }
+
         void RefreshManifest()
         {
             if (curServer != null && curServer.IsCollection) { ApplyServerKind(); return; }
@@ -2500,8 +2580,7 @@ namespace VFALauncher
             {
                 try
                 {
-                    var sep = url.Contains("?") ? "&" : "?";
-                    var txt = Downloader.GetString(url + sep + "nocache=" + DateTime.UtcNow.Ticks);
+                    var txt = LoadManifestText(url);
                     manifest = Util.Json.Deserialize<Dictionary<string, object>>(txt);
                     BeginInvoke((Action)(() =>
                     {
@@ -2664,10 +2743,68 @@ namespace VFALauncher
                 "Mods ueber den Steam-Workshop", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        // ---------- ZombieBuddy erkannt, aber nicht eingerichtet -> nachfragen (neueste Version + Compatibility-Fix)
+        static bool ZbInstalled()
+        {
+            try
+            {
+                var pz = SteamInfo.PZInstallDir(); if (pz == null) return true;
+                if (!File.Exists(Path.Combine(pz, "ZombieBuddy.jar")) || !File.Exists(Path.Combine(pz, "zbNative.dll"))) return false;
+                var j = Path.Combine(pz, "ProjectZomboid64.json");
+                return File.Exists(j) && File.ReadAllText(j).Contains("-agentlib:zbNative");
+            }
+            catch { return true; }
+        }
+
+        static bool ZbDetected()
+        {
+            try
+            {
+                var dirs = new List<string> { Path.Combine(Util.ZomboidDir, "mods") };
+                foreach (var lib in SteamInfo.Libraries())
+                {
+                    var root = Path.Combine(lib, "steamapps", "workshop", "content", "108600");
+                    if (!Directory.Exists(root)) continue;
+                    foreach (var item in Directory.GetDirectories(root))
+                    {
+                        var n = Path.GetFileName(item);
+                        if (n == "3619862853" || n == "3809837933") return true;
+                        var m = Path.Combine(item, "mods"); if (Directory.Exists(m)) dirs.Add(m);
+                    }
+                }
+                foreach (var d in dirs)
+                {
+                    if (!Directory.Exists(d)) continue;
+                    foreach (var mod in Directory.GetDirectories(d))
+                    {
+                        if (Path.GetFileName(mod).StartsWith("ZombieBuddy", StringComparison.OrdinalIgnoreCase)) return true;
+                        foreach (var mi in new[] { Path.Combine(mod, "mod.info"), Path.Combine(mod, "42", "mod.info") })
+                            if (File.Exists(mi) && File.ReadAllText(mi).IndexOf("javaJarFile", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // true = Installation wurde angestossen (Spielstart dann abbrechen, Nutzer klickt danach erneut)
+        bool OfferZombieBuddy()
+        {
+            if (ZbInstalled() || !ZbDetected()) return false;
+            var pr = LoadPrefs();
+            if (Util.S(pr, "zbOffer") == "no") return false;
+            if (Loc.Show(this, "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? (neueste Version + B42-Fix)", "ZombieBuddy", MessageBoxButtons.YesNo) != DialogResult.Yes)
+            { pr["zbOffer"] = "no"; try { Util.WriteJson(Path.Combine(Util.DataDir, "prefs.json"), pr); } catch { } return false; }
+            using (var f = new ZbForm((int)numRam.Value) { Auto = true }) f.ShowDialog(this);
+            AppendLog("ZombieBuddy-Installation beendet - bitte 'Spielen' erneut klicken.");
+            return true;
+        }
+
         void Play()
         {
             try
             {
+                if (OfferZombieBuddy()) return;
                 if (curServer != null && curServer.IsCollection)
                 {
                     Process.Start("steam://rungameid/108600");
@@ -2769,6 +2906,8 @@ namespace VFALauncher
         protected override void OnLoad(EventArgs e) { base.OnLoad(e); Loc.Apply(this); }
         const string FIX_WID = "3809837933";
         ComboBox cbVer, cbVar; NumericUpDown numRam; TextBox log; Button bLoad, bInst; Label lblStat;
+        public bool Auto; bool autoDone;
+        void AutoRun() { if (!Auto || autoDone) return; autoDone = true; cbVar.SelectedIndex = 1; DoInstall(); }   // Rueckfrage bestaetigt: Fix-Variante mit neuester DLL direkt installieren
         readonly Dictionary<string, string[]> rel = new Dictionary<string, string[]>(); // Tag -> {jarUrl, dllUrl}
 
         public ZbForm(int ramGb)
@@ -2821,10 +2960,10 @@ namespace VFALauncher
                         rel.Clear(); cbVer.Items.Clear();
                         foreach (var kv in tmp) { rel[kv.Key] = kv.Value; cbVer.Items.Add(kv.Key); }
                         if (cbVer.Items.Count > 0) cbVer.SelectedIndex = 0;
-                        lblStat.Text = tmp.Count + " Version(en) mit Jar + DLL gefunden."; bLoad.Enabled = true; bInst.Enabled = true;
+                        lblStat.Text = tmp.Count + " Version(en) mit Jar + DLL gefunden."; bLoad.Enabled = true; bInst.Enabled = true; AutoRun();
                     }));
                 }
-                catch (Exception ex) { BeginInvoke((Action)(() => { lblStat.Text = "GitHub nicht erreichbar: " + ex.Message; bLoad.Enabled = true; bInst.Enabled = cbVar.SelectedIndex == 1; })); }
+                catch (Exception ex) { BeginInvoke((Action)(() => { lblStat.Text = "GitHub nicht erreichbar: " + ex.Message; bLoad.Enabled = true; bInst.Enabled = cbVar.SelectedIndex == 1; AutoRun(); })); }
             }) { IsBackground = true }.Start();
         }
 
@@ -2861,6 +3000,7 @@ namespace VFALauncher
                     if (useFix)
                     {
                         var libs = FindFixLibs();
+                        if (libs == null) { try { Process.Start("steam://openurl/https://steamcommunity.com/sharedfiles/filedetails/?id=" + FIX_WID); L("Workshop-Seite des Fixes wird in Steam geoeffnet - bitte abonnieren, danach hier erneut 'Installieren' klicken."); } catch { } }
                         if (libs == null) throw new Exception("Der Compatibility-Fix wurde nicht gefunden. Bitte Workshop-Item " + FIX_WID + " in Steam abonnieren (oder den Mod 'ZombieBuddyFix' nach Zomboid\\mods legen) und erneut versuchen.");
                         L("Fix-Mod gefunden: " + libs);
                         jar = Path.Combine(libs, "ZombieBuddy.jar"); dll = Path.Combine(libs, "zbNative.dll");

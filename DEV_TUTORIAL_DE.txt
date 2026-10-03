@@ -102,7 +102,17 @@ ZombieBuddy-Vorgabe (Abschnitt 5): Hier holst du die passende zbNative.dll von G
 
 G) SPIELER-PAKET ZUSAMMENSTELLEN
 --------------------------------
-Das bekommen deine Spieler (als ZIP, z.B. GitHub-Release oder dein Discord):
+EINFACHSTER WEG: Tab DEV, Abschnitt 4 -> Knopf "Spieler-Paket erstellen (ZIP) ...". Der Launcher packt dann automatisch
+alles Noetige in EIN ZIP, das du nur noch weitergibst (Spieler: entpacken, majestiKLauncher.exe starten, Installieren):
+    majestiKLauncher.exe + .config, launcher.cfg (Start-Server), servers.json (deine vorkonfigurierten Server),
+    Ordner logos (deine mit "Logo ..." gesetzten Logos), Ordner manifests (Kopie der gespeicherten Manifeste),
+    launcher_info.txt / launcher_info_en.txt.
+Voraussetzung: pro Server vorher "manifest.json speichern" (Abschnitt 3) und die Mod-ZIP + Manifest online haben.
+Der Launcher nutzt immer zuerst den ONLINE-Link des Manifests (damit Updates ankommen) und faellt nur auf die mitgelieferte
+Kopie zurueck, wenn der Link nicht erreichbar ist. ACHTUNG: Das Manifest enthaelt ggf. das Server-Passwort.
+Eine servers.json NEBEN der exe gilt als feste Serverliste der Spieler (ohne Internet-Liste, ausser serverListUrl ist gesetzt).
+
+Manuell (ohne den Knopf) bekommen deine Spieler diese Dateien: Das bekommen deine Spieler (als ZIP, z.B. GitHub-Release oder dein Discord):
     majestiKLauncher.exe
     majestiKLauncher.exe.config
     launcher.cfg                 (mit deinem Start-Server und serverListUrl, siehe E)
