@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.7.2", FrameworkDisplayName = ".NET Framework 4.7.2")]
 [assembly: System.Reflection.AssemblyTitle("majestiK Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.6.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.7.0")]
 
 namespace VFALauncher
 {
@@ -357,6 +357,20 @@ namespace VFALauncher
             "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? (neueste Version + B42-Fix)", "ZombieBuddy (Java mods) was detected but is not set up.\r\nInstall it now? (latest version + B42 fix)",
             "ZombieBuddy-Installation beendet - bitte 'Spielen' erneut klicken.", "ZombieBuddy installation finished - please click 'Play' again.",
             "Workshop-Seite des Fixes wird in Steam geoeffnet - bitte abonnieren, danach hier erneut 'Installieren' klicken.", "Opening the fix's Workshop page in Steam - please subscribe, then click 'Install' here again.",
+            // --- ZombieBuddy Extensions
+            "Empfohlen: ZombieBuddy Extensions 1.3\r\n(Workshop 3807686870, ZombieBuddy 2.3.4 + Extensions, DLL des Originals)", "Recommended: ZombieBuddy Extensions 1.3\r\n(Workshop 3807686870, ZombieBuddy 2.3.4 + Extensions, DLL of the original)",
+            "Empfohlen: ZombieBuddy Extensions (Workshop ", "Recommended: ZombieBuddy Extensions (Workshop ",
+            ") - Extensions-Jar + DLL des Original-ZombieBuddy", ") - extensions jar + DLL of the original ZombieBuddy",
+            "ZombieBuddy Extensions gefunden: ", "ZombieBuddy Extensions found: ",
+            "ZombieBuddy Extensions wurde nicht gefunden. Bitte Workshop-Item ", "ZombieBuddy Extensions was not found. Please subscribe to Workshop item ",
+            "zbNative.dll des Original-ZombieBuddy: ", "zbNative.dll of the original ZombieBuddy: ",
+            "Original-DLL nicht gefunden - lade zbNative.dll (neueste Version) ...", "Original DLL not found - downloading zbNative.dll (latest version) ...",
+            "ZombieBuddy Extensions installieren ...", "Installing ZombieBuddy Extensions ...",
+            "ZombieBuddy Extensions ist bereits installiert.", "ZombieBuddy Extensions is already installed.",
+            "HINWEIS - ZombieBuddy Extensions nicht gefunden (weder im Paket noch als Workshop-Item ", "NOTE - ZombieBuddy Extensions not found (neither in the package nor as Workshop item ",
+            ") - uebersprungen.", ") - skipped.",
+            "WARNUNG - ZombieBuddy Extensions: ", "WARNING - ZombieBuddy Extensions: ",
+            "ZombieBuddy Extensions: ", "ZombieBuddy Extensions: ",
         };
 
         static void Build()
@@ -1110,6 +1124,77 @@ namespace VFALauncher
             if (!PatchLauncherJson(pzDir, ramGb)) Log("ProjectZomboid64.json war schon passend.");
         }
 
+        // ZombieBuddy Extensions (Workshop 3807686870, frueher "[B42] Temporary 42.21 Fix"): ersetzt nur die ZombieBuddy.jar,
+        // die zbNative.dll kommt aus dem Original-ZombieBuddy. Quelle: Paket (_launcher\ZombieBuddyExtensions.jar) oder Workshop/Zomboid\mods.
+        public const string ZB_EXT = "3807686870";
+        public static string FindZbExtensionsJar()
+        {
+            var packJar = Path.Combine(Util.DataDir, "pack_launcher", "ZombieBuddyExtensions.jar");
+            if (File.Exists(packJar)) return packJar;
+            var roots = new List<string> {
+                Path.Combine(Util.ZomboidDir, "mods", "ZombieBuddy_Extensions"),
+                Path.Combine(Util.ZomboidDir, "mods", "ZombieBuddy_B42.21_TemporaryFix") };
+            try
+            {
+                foreach (var lib in SteamInfo.Libraries())
+                {
+                    var m = Path.Combine(lib, "steamapps", "workshop", "content", "108600", ZB_EXT, "mods");
+                    if (Directory.Exists(m)) roots.AddRange(Directory.GetDirectories(m));
+                }
+            }
+            catch { }
+            foreach (var r in roots)
+            {
+                if (!Directory.Exists(r)) continue;
+                try { var f = Directory.GetFiles(r, "ZombieBuddy.jar", SearchOption.AllDirectories).FirstOrDefault(); if (f != null) return f; } catch { }
+            }
+            return null;
+        }
+
+        // zbNative.dll des Original-ZombieBuddy (Workshop 3619862853), sonst die aus dem Paket
+        public static string FindOriginalZbDll()
+        {
+            try
+            {
+                foreach (var lib in SteamInfo.Libraries())
+                {
+                    var p = Path.Combine(lib, "steamapps", "workshop", "content", "108600", PackBuilder.ZB_ORIGINAL, "mods", "ZombieBuddy", "libs", "zbNative.dll");
+                    if (File.Exists(p)) return p;
+                }
+            }
+            catch { }
+            foreach (var p in new[] {
+                Path.Combine(Util.DataDir, "pack_launcher", "zbNative.dll"),
+                Path.Combine(Util.ZomboidDir, "mods", "ZombieBuddy", "libs", "zbNative.dll") })
+                if (File.Exists(p)) return p;
+            return null;
+        }
+
+        // Am Ende der Paket-Installation: ZombieBuddy Extensions ins Spielverzeichnis (wird als Auswahl gemerkt, damit "Spielen" sie nicht ueberschreibt)
+        public void InstallZbExtensions(string pzDir, int ramGb)
+        {
+            var jar = FindZbExtensionsJar();
+            if (jar == null) { Log("HINWEIS - ZombieBuddy Extensions nicht gefunden (weder im Paket noch als Workshop-Item " + ZB_EXT + ") - uebersprungen."); return; }
+            var sha = Util.Sha256File(jar);
+            var gj = Path.Combine(pzDir, "ZombieBuddy.jar");
+            if (File.Exists(gj) && Util.Sha256File(gj) == sha && Util.S(UserZb(), "jarSha") == sha && File.Exists(Path.Combine(pzDir, "zbNative.dll")))
+            {
+                Log("ZombieBuddy Extensions ist bereits installiert.");
+                PatchLauncherJson(pzDir, ramGb);
+                return;
+            }
+            var dll = FindOriginalZbDll() ?? FindZbNative(Path.Combine(Util.ZomboidDir, "mods"));
+            if (dll == null) throw new Exception("zbNative.dll nicht gefunden.");
+            Log("ZombieBuddy Extensions installieren ...");
+            Log("ZombieBuddy Extensions gefunden: " + jar);
+            Log("zbNative.dll des Original-ZombieBuddy: " + dll);
+            // Quelle darf nicht im Spielordner liegen (InstallZbFiles loescht dort zuerst)
+            var tmp = Path.Combine(Util.DataDir, "zb_install"); Directory.CreateDirectory(tmp);
+            if (string.Equals(Path.GetFullPath(Path.GetDirectoryName(dll)), Path.GetFullPath(pzDir), StringComparison.OrdinalIgnoreCase))
+            { var c = Path.Combine(tmp, "zbNative.dll"); File.Copy(dll, c, true); dll = c; }
+            InstallZbFiles(pzDir, jar, dll, ramGb);
+        }
+
         // Vom DEV festgelegte zbNative.dll aus dem Manifest ("zombieBuddy": {version, dllUrl, dllSha256})
         public Dictionary<string, object> ZbPin;
 
@@ -1535,6 +1620,19 @@ namespace VFALauncher
                 Directory.CreateDirectory(launcherDir);
                 if (File.Exists(dll)) { File.Copy(dll, Path.Combine(launcherDir, "zbNative.dll"), true); Log("zbNative.dll aus ZombieBuddy (" + ZB_ORIGINAL + ") uebernommen."); }
                 else Log("WARNUNG - zbNative.dll nicht gefunden (ZombieBuddy-Original " + ZB_ORIGINAL + " abonnieren).");
+            }
+            // ZombieBuddy Extensions: Jar ins Paket (_launcher), wird beim Spieler am Ende der Installation eingespielt
+            {
+                string extJar = null;
+                var extMods = Path.Combine(workshopDir, Installer.ZB_EXT, "mods");
+                if (Directory.Exists(extMods)) try { extJar = Directory.GetFiles(extMods, "ZombieBuddy.jar", SearchOption.AllDirectories).FirstOrDefault(); } catch { }
+                if (extJar != null)
+                {
+                    Directory.CreateDirectory(launcherDir);
+                    File.Copy(extJar, Path.Combine(launcherDir, "ZombieBuddyExtensions.jar"), true);
+                    Log("ZombieBuddy Extensions (" + Installer.ZB_EXT + ") ins Paket uebernommen: _launcher\\ZombieBuddyExtensions.jar");
+                }
+                else Log("WARNUNG - ZombieBuddy Extensions nicht gefunden (Workshop-Item " + Installer.ZB_EXT + " abonnieren) - Paket ohne Extensions.");
             }
 
             // Kurator-Konfiguration (Very Far Away - Zomboid Folder\Zomboid)
@@ -2788,6 +2886,7 @@ namespace VFALauncher
                     q.SetupZombieBuddy(pz, ram);
                     q.ApproveWorkshopJavaMods(wsWidsM);
                     try { q.EnsureMenuMods(); } catch (Exception ex) { AppendLog("WARNUNG - default.txt (Horse): " + ex.Message); }
+                    try { q.InstallZbExtensions(pz, ram); } catch (Exception ex) { AppendLog("WARNUNG - ZombieBuddy Extensions: " + ex.Message); }
                     AppendLog("FERTIG.");
                     BeginInvoke((Action)(() => { UpdateStatusLabel(); WorkshopInfo(wsWidsM.Count); }));
                     return;
@@ -2835,6 +2934,7 @@ namespace VFALauncher
                 try { inst.EnsureMenuMods(); } catch (Exception ex) { AppendLog("WARNUNG - default.txt (Horse): " + ex.Message); }
                 var missingRes = wsRes.Where(f => !Directory.Exists(Path.Combine(Util.ZomboidDir, "mods", f)) && !Util.L(wsBlock, "folders").Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
                 if (missingRes.Count > 0) AppendLog("WARNUNG - nicht im Paket enthalten (Server-Admin muss das Paket neu bauen): " + string.Join(", ", missingRes));
+                try { inst.InstallZbExtensions(pz, ram); } catch (Exception ex) { AppendLog("WARNUNG - ZombieBuddy Extensions: " + ex.Message); }
 
                 var st = inst.LoadState();
                 st["version"] = localZip == null ? ManifestVersion() : "manuell " + DateTime.Now.ToString("yyyy-MM-dd HH:mm");
@@ -3070,8 +3170,8 @@ namespace VFALauncher
             Text = "ZombieBuddy"; Width = 650; Height = 330; StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
             Controls.Add(new Label { Text = "ZombieBuddy (Java-Mods) wurde erkannt, ist aber nicht eingerichtet.\r\nJetzt installieren? Waehle die Variante:", AutoSize = true, Location = new Point(14, 14) });
-            var b4 = new Button { Text = "Neueste Version von GitHub (ohne Fix)\r\n(ZombieBuddy v2.3.4 oder neuer)", Location = new Point(14, 66), Size = new Size(610, 56) };
-            var b1 = new Button { Text = "Neueste Version + Fix:\r\n[B42] Temporary 42.21 Fix for ZombieBuddy\r\n(Workshop 3807686870)", Location = new Point(14, 134), Size = new Size(300, 72) };
+            var b1 = new Button { Text = "Empfohlen: ZombieBuddy Extensions 1.3\r\n(Workshop 3807686870, ZombieBuddy 2.3.4 + Extensions, DLL des Originals)", Location = new Point(14, 66), Size = new Size(610, 56), Font = new Font(Font, FontStyle.Bold) };
+            var b4 = new Button { Text = "Neueste Version von GitHub (ohne Fix)\r\n(ZombieBuddy v2.3.4 oder neuer)", Location = new Point(14, 134), Size = new Size(300, 72) };
             var b2 = new Button { Text = "Neueste Version + Fix:\r\n[PATCH] ZombieBuddy\r\n(Workshop 3809837933)", Location = new Point(324, 134), Size = new Size(300, 72) };
             var b3 = new Button { Text = "Nein", Location = new Point(14, 226), Size = new Size(120, 34) };
             b4.Click += (s, e) => { Choice = 3; Close(); };
@@ -3102,8 +3202,8 @@ namespace VFALauncher
             cbVar = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(14, 96), Width = 716 };
             cbVar.Items.Add("Original: ZombieBuddy (Workshop 3619862853) - Jar + DLL aus dem gewaehlten GitHub-Release");
             cbVar.Items.Add("Fix: [PATCH] ZombieBuddy (Workshop " + FIX_WID + ") - Jar + DLL aus dem Fix-Mod");
-            cbVar.Items.Add("Fix: [B42] Temporary 42.21 Fix for ZombieBuddy (Workshop " + TEMP_WID + ") - Jar aus dem Fix, DLL aus dem neuesten Release");
-            cbVar.SelectedIndex = 0;
+            cbVar.Items.Add("Empfohlen: ZombieBuddy Extensions (Workshop " + TEMP_WID + ") - Extensions-Jar + DLL des Original-ZombieBuddy");
+            cbVar.SelectedIndex = 2;
             Controls.Add(new Label { Text = "RAM fuer das Spiel (GB, 0 = nicht aendern):", AutoSize = true, Location = new Point(14, 132) });
             numRam = new NumericUpDown { Minimum = 0, Maximum = 64, Value = Math.Max(0, Math.Min(64, ramGb)), Location = new Point(300, 128), Width = 60 };
             bInst = new Button { Text = "Installieren", Location = new Point(14, 164), Width = 200, Height = 34, Enabled = false };
@@ -3113,6 +3213,7 @@ namespace VFALauncher
             bReset.Click += (s, e) => { Installer.ClearUserZb(); log.AppendText("Deine ZombieBuddy-Auswahl wurde vergessen - beim naechsten Installieren/Spielen gilt wieder die Version aus dem Paket.\r\n"); };
             Controls.AddRange(new Control[] { cbVer, bLoad, bReset, cbVar, numRam, bInst, lblStat, log });
             cbVar.SelectedIndexChanged += (s, e) => { cbVer.Enabled = cbVar.SelectedIndex == 0; bInst.Enabled = cbVar.SelectedIndex != 0 || cbVer.Items.Count > 0; };
+            cbVer.Enabled = false;   // Standard: Extensions (Version kommt aus dem Workshop-Item)
             bLoad.Click += (s, e) => LoadReleases();
             bInst.Click += (s, e) => DoInstall();
             Shown += (s, e) => LoadReleases();
@@ -3154,23 +3255,6 @@ namespace VFALauncher
                 }
                 catch (Exception ex) { BeginInvoke((Action)(() => { lblStat.Text = "GitHub nicht erreichbar: " + ex.Message; bLoad.Enabled = true; bInst.Enabled = cbVar.SelectedIndex != 0; AutoRun(); })); }
             }) { IsBackground = true }.Start();
-        }
-
-        // Fix-Mod suchen: Zomboid\mods\ZombieBuddyFix oder Workshop-Ordner (alle Steam-Bibliotheken)
-        static string FindTempFixJar()
-        {
-            var roots = new List<string> { Path.Combine(Util.ZomboidDir, "mods", "ZombieBuddy_B42.21_TemporaryFix") };
-            foreach (var lib in SteamInfo.Libraries())
-            {
-                var m = Path.Combine(lib, "steamapps", "workshop", "content", "108600", TEMP_WID, "mods");
-                if (Directory.Exists(m)) roots.AddRange(Directory.GetDirectories(m));
-            }
-            foreach (var r in roots)
-            {
-                if (!Directory.Exists(r)) continue;
-                try { var f = Directory.GetFiles(r, "ZombieBuddy.jar", SearchOption.AllDirectories).FirstOrDefault(); if (f != null) return f; } catch { }
-            }
-            return null;
         }
 
         static string FindZbDll()
@@ -3216,17 +3300,21 @@ namespace VFALauncher
                     string jar, dll, what, zbsPath = null;
                     if (useTemp)
                     {
-                        var tj = FindTempFixJar();
+                        var tj = Installer.FindZbExtensionsJar();
                         if (tj == null)
                         {
                             try { Process.Start("steam://openurl/https://steamcommunity.com/sharedfiles/filedetails/?id=" + TEMP_WID); L("Workshop-Seite des Fixes wird in Steam geoeffnet - bitte abonnieren, danach hier erneut 'Installieren' klicken."); } catch { }
-                            throw new Exception("Der Fix '[B42] Temporary 42.21 Fix for ZombieBuddy' wurde nicht gefunden. Bitte Workshop-Item " + TEMP_WID + " in Steam abonnieren und erneut versuchen.");
+                            throw new Exception("ZombieBuddy Extensions wurde nicht gefunden. Bitte Workshop-Item " + TEMP_WID + " in Steam abonnieren und erneut versuchen.");
                         }
-                        L("Temporary Fix gefunden: " + tj);
-                        jar = tj; dll = Path.Combine(tmpDir, "zbNative.dll");
-                        if (firstRel != null && firstRel[1] != "") { L("Lade zbNative.dll (neueste Version) ..."); Downloader.GetFile(firstRel[1], dll); }
+                        L("ZombieBuddy Extensions gefunden: " + tj);
+                        jar = tj;
+                        // laut Extensions-Anleitung: zbNative.dll aus dem Original-ZombieBuddy (Workshop 3619862853)
+                        var od = Installer.FindOriginalZbDll();
+                        if (od != null && !string.Equals(Path.GetFullPath(Path.GetDirectoryName(od)), Path.GetFullPath(pz), StringComparison.OrdinalIgnoreCase))
+                        { dll = od; L("zbNative.dll des Original-ZombieBuddy: " + dll); }
+                        else if (firstRel != null && firstRel[1] != "") { dll = Path.Combine(tmpDir, "zbNative.dll"); L("Original-DLL nicht gefunden - lade zbNative.dll (neueste Version) ..."); Downloader.GetFile(firstRel[1], dll); }
                         else { dll = FindZbDll(); if (dll == null) throw new Exception("GitHub nicht erreichbar und keine zbNative.dll gefunden."); }
-                        what = "B42.21 Temporary Fix (Workshop " + TEMP_WID + ") + neueste DLL";
+                        what = "ZombieBuddy Extensions (Workshop " + TEMP_WID + ")";
                     }
                     else if (useFix)
                     {
